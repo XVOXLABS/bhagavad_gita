@@ -1,0 +1,638 @@
+:root {
+  color-scheme: light;
+  --bg: #f3ecdf;
+  --bg-deep: #e7dccb;
+  --ink: #241c16;
+  --muted: #6f6256;
+  --line: #ddcfc0;
+  --card: #fffaf3;
+  --user: #3f2b22;
+  --user-text: #f8f1e7;
+  --accent: #9a3412;
+  --error-bg: #f8e6e0;
+  --shadow: 0 18px 50px rgba(60, 36, 18, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(255, 250, 243, 0.9), transparent 42%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-serif), Georgia, serif;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  width: min(42rem, calc(100% - 1.5rem));
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 0 1rem;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0.2rem 0 0;
+  font-size: 2rem;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+}
+
+.text-button,
+.composer button {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.text-button {
+  background: transparent;
+  color: var(--accent);
+  padding: 0.45rem 0.2rem;
+}
+
+.text-button:disabled,
+.composer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.4rem 0 1rem;
+}
+
+.empty {
+  margin: auto 0;
+  padding: 2rem 0 3rem;
+}
+
+.empty p {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+  max-width: 12ch;
+}
+
+.bubble,
+.reply {
+  max-width: 38rem;
+}
+
+.bubble {
+  border-radius: 1.1rem;
+  padding: 0.85rem 1rem;
+}
+
+.bubble p,
+.guidance,
+.verse p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.user {
+  align-self: flex-end;
+  background: var(--user);
+  color: var(--user-text);
+}
+
+.error {
+  background: var(--error-bg);
+  color: #7a2e16;
+}
+
+.reply {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.guidance {
+  font-size: 1.18rem;
+  line-height: 1.55;
+}
+
+.verse {
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 1rem 1rem 0.9rem;
+  box-shadow: var(--shadow);
+}
+
+.verse figcaption {
+  color: var(--accent);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.7rem;
+}
+
+.sanskrit {
+  font-family: var(--font-devanagari), serif;
+  font-size: 1.28rem;
+  line-height: 1.75;
+}
+
+.verse p + p {
+  margin-top: 0.75rem;
+}
+
+.verse span {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.verse .summary {
+  font-size: 1.05rem;
+  line-height: 1.55;
+  padding: 0.7rem 0.8rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+  border-radius: 0 0.6rem 0.6rem 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
+.tags li {
+  font-size: 0.78rem;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.verse details {
+  margin-top: 0.8rem;
+  color: var(--muted);
+}
+
+.verse details summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.verse details p {
+  margin-top: 0.75rem;
+  color: var(--ink);
+}
+
+.connection,
+.step {
+  max-width: 38rem;
+}
+
+.connection h2,
+.step h2 {
+  margin: 0 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.connection p,
+.step p {
+  margin: 0;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.step {
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: 0.9rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.crisis {
+  background: #fff4e5;
+  border: 1px solid #f0b46b;
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  color: #5a3208;
+}
+
+.crisis p {
+  margin: 0 0 0.6rem;
+  line-height: 1.5;
+}
+
+.crisis ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.crisis a {
+  color: inherit;
+  font-size: 1.05rem;
+}
+
+.crisis small {
+  display: block;
+  color: #7a4a12;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.talk-button,
+.talk-primary,
+.listen-button,
+.mic-button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.talk-button {
+  border: 0;
+  background: var(--accent);
+  color: white;
+  padding: 0.5rem 1rem;
+}
+
+.talk-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.voice-settings {
+  position: relative;
+}
+
+.voice-settings summary {
+  cursor: pointer;
+  color: var(--accent);
+  padding: 0.45rem 0.2rem;
+  list-style: none;
+}
+
+.voice-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.voice-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 10;
+  width: min(20rem, calc(100vw - 2rem));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.7rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.9rem;
+  box-shadow: var(--shadow);
+}
+
+.voice-panel label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.voice-panel label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink);
+}
+
+.voice-panel select {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--ink);
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.voice-panel .hint {
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.listen-button {
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--accent);
+  padding: 0.35rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+.listen-button[aria-pressed='true'] {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.composer-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.composer .mic-button {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.composer .mic-button[aria-pressed='true'] {
+  background: #7a2e16;
+  border-color: #7a2e16;
+  color: white;
+}
+
+.listening {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.talk-panel {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  text-align: center;
+  background: color-mix(in srgb, var(--bg) 92%, white);
+  border: 1px solid var(--line);
+  border-radius: 1.2rem;
+  padding: 1.2rem 1rem 0.9rem;
+  box-shadow: var(--shadow);
+}
+
+.talk-orb {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f6c27a, var(--accent));
+  opacity: 0.85;
+}
+
+.talk-panel[data-mode='listening'] .talk-orb {
+  animation: talk-pulse 1.4s ease-in-out infinite;
+}
+
+.talk-panel[data-mode='thinking'] .talk-orb {
+  animation: talk-breathe 2.4s ease-in-out infinite;
+}
+
+.talk-panel[data-mode='speaking'] .talk-orb {
+  animation: talk-pulse 0.9s ease-in-out infinite;
+  background: radial-gradient(circle at 35% 35%, #ffd89b, #b4531c);
+}
+
+.talk-panel[data-mode='paused'] .talk-orb {
+  opacity: 0.35;
+}
+
+@keyframes talk-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes talk-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talk-orb {
+    animation: none !important;
+  }
+}
+
+.talk-status {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.talk-interim,
+.talk-note {
+  margin: 0;
+  color: var(--muted);
+  max-width: 32rem;
+}
+
+.talk-actions {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.talk-primary {
+  border: 0;
+  background: var(--accent);
+  color: white;
+  padding: 0.7rem 1.4rem;
+  font-size: 1rem;
+}
+
+.pending {
+  margin: 0;
+  color: var(--muted);
+}
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  background: color-mix(in srgb, var(--bg) 92%, white);
+  border: 1px solid var(--line);
+  border-radius: 1.2rem;
+  padding: 0.85rem 0.9rem 0.75rem;
+  box-shadow: var(--shadow);
+}
+
+.composer label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 5.2rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+  line-height: 1.45;
+}
+
+.composer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.composer-row p,
+.form-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.form-error {
+  color: #7a2e16;
+  margin-top: 0.35rem;
+}
+
+.composer button {
+  background: var(--accent);
+  color: white;
+  padding: 0.55rem 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 1rem, 42rem);
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .top-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .voice-panel {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: auto;
+    width: auto;
+    margin-top: 0.4rem;
+  }
+
+  .talk-button {
+    padding: 0.45rem 0.85rem;
+  }
+
+  .composer-row {
+    flex-wrap: wrap;
+  }
+
+  .composer-buttons {
+    margin-left: auto;
+  }
+
+  .guidance {
+    font-size: 1.08rem;
+  }
+
+  .sanskrit {
+    font-size: 1.15rem;
+  }
+
+  .talk-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .talk-primary {
+    width: 100%;
+  }
+
+  .empty p {
+    font-size: 2.1rem;
+  }
+}

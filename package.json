@@ -1,0 +1,27 @@
+{
+  "name": "bhagavad-gita-chat",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "tsx --test src/lib/corpus.test.ts src/lib/verify.test.ts src/lib/retrieve.test.ts src/lib/safety.test.ts src/lib/speech.test.ts",
+    "enrich": "tsx scripts/enrich-verses.ts",
+    "embed": "tsx scripts/embed-verses.ts",
+    "eval": "tsx scripts/run-eval.ts"
+  },
+  "dependencies": {
+    "next": "^15.5.4",
+    "openai": "^5.23.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
