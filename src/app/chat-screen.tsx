@@ -22,7 +22,7 @@ type Reply = { acknowledge: string; connection: string; step: string };
 
 type Crisis = { message: string; helplines: { name: string; number: string; note: string }[] } | null;
 
-type ChatStatus = 'answered' | 'no_strong_match' | 'unavailable';
+type ChatStatus = 'answered' | 'no_strong_match' | 'conversation' | 'unavailable';
 
 type ChatResponse = {
   status: ChatStatus;
@@ -30,6 +30,7 @@ type ChatResponse = {
   reply?: Reply;
   verses: DisplayVerse[];
   crisis?: Crisis;
+  language?: string;
   error?: string;
 };
 
@@ -41,7 +42,8 @@ type UiMessage =
       reply: Reply;
       verses: DisplayVerse[];
       crisis: Crisis;
-      status: 'answered' | 'no_strong_match';
+      language: string;
+      status: 'answered' | 'no_strong_match' | 'conversation';
     }
   | { id: string; role: 'error'; text: string; crisis: Crisis };
 
@@ -67,7 +69,7 @@ function VerseCard({ verse }: { verse: DisplayVerse }) {
   const themes = (verse.verseThemes ?? []).filter((theme) => theme !== 'narrative');
   const more = verse.transliteration || verse.hindiMeaning || verse.wordMeanings;
   return (
-    <figure className="verse">
+    <figure className="verse" lang="en">
       <figcaption>
         Chapter {verse.chapter}, Verse {verse.verse}
         {verse.themes?.[0] ? <> · {verse.themes[0]}</> : null}
@@ -189,20 +191,15 @@ export function ChatScreen() {
       const id = crypto.randomUUID();
       const reply = data.reply ?? { acknowledge: data.guidance, connection: '', step: '' };
       const crisis = data.crisis ?? null;
+      const language = data.language ?? 'en';
+      const status = data.status === 'no_strong_match' || data.status === 'conversation' ? data.status : 'answered';
       setMessages((current) => [
         ...current,
-        {
-          id,
-          role: 'assistant',
-          reply,
-          verses: data.verses ?? [],
-          crisis,
-          status: data.status === 'no_strong_match' ? 'no_strong_match' : 'answered',
-        },
+        { id, role: 'assistant', reply, verses: data.verses ?? [], crisis, language, status },
       ]);
-      const spoken = speakableText(reply, crisis?.message);
-      if (!fromTalk && autoPlayRef.current && voice.supported) voice.speak(id, spoken);
-      return { speak: spoken, pause: Boolean(crisis) };
+      const spoken = speakableText(reply, crisis?.message, language);
+      if (!fromTalk && autoPlayRef.current && voice.supported) voice.speak(id, spoken, undefined, language);
+      return { speak: spoken, pause: Boolean(crisis), language };
     } catch {
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null }]);
       return { speak: UNAVAILABLE_SPOKEN, pause: true };
@@ -382,7 +379,7 @@ export function ChatScreen() {
             }
             const speaking = voice.speakingId === item.id;
             return (
-              <article key={item.id} className="reply">
+              <article key={item.id} className="reply" lang={item.language}>
                 {item.crisis ? <CrisisCard crisis={item.crisis} /> : null}
                 {item.reply.acknowledge ? <p className="guidance">{item.reply.acknowledge}</p> : null}
                 {item.verses.map((verse) => (
@@ -406,7 +403,14 @@ export function ChatScreen() {
                     className="listen-button"
                     aria-pressed={speaking}
                     onClick={() =>
-                      speaking ? voice.stop() : voice.speak(item.id, speakableText(item.reply, item.crisis?.message))
+                      speaking
+                        ? voice.stop()
+                        : voice.speak(
+                            item.id,
+                            speakableText(item.reply, item.crisis?.message, item.language),
+                            undefined,
+                            item.language,
+                          )
                     }
                   >
                     {speaking ? 'Stop' : 'Listen'}

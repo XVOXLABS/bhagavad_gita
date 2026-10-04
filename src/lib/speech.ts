@@ -5,28 +5,38 @@ export type VoiceLike = { name: string; lang: string; default?: boolean };
 export const VOICE_RATE = 0.92;
 export const VOICE_PITCH = 0.9;
 
-function clean(text: string): string {
-  return text
+/** Languages written in Devanagari; for every other language, Devanagari can only be Sanskrit and is skipped. */
+const DEVANAGARI_SPEECH = new Set(['hi', 'mr']);
+
+function clean(text: string, language: string): string {
+  const withoutSanskrit = DEVANAGARI_SPEECH.has(language) ? text : text.replace(/[ऀ-ॿ]+/g, '');
+  return withoutSanskrit
     .replace(/https?:\/\/\S+/g, '')
-    .replace(/[ऀ-ॿ]+/g, '')
     .replace(/\b\d{1,2}\s*\.\s*\d{1,3}\b/g, '')
     .replace(/[*_#`>~]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function sentence(text: string): string {
-  const value = clean(text);
+function sentence(text: string, language: string): string {
+  const value = clean(text, language);
   if (!value) return '';
-  return /[.!?]$/.test(value) ? value : `${value}.`;
+  return /[.!?।]$/.test(value) ? value : `${value}.`;
 }
 
 /** Krishna's words in speaking order. Sanskrit and verse numbers are left out; browser voices cannot say them well. */
-export function speakableText(reply: SpeakableReply, lead?: string): string {
-  const parts = [lead ? sentence(lead) : '', sentence(reply.acknowledge), sentence(reply.connection)];
-  const step = sentence(reply.step);
-  if (step) parts.push(`One step for today. ${step}`);
+export function speakableText(reply: SpeakableReply, lead?: string, language = 'en'): string {
+  const parts = [lead ? sentence(lead, 'en') : '', sentence(reply.acknowledge, language), sentence(reply.connection, language)];
+  const step = sentence(reply.step, language);
+  if (step) parts.push(language === 'en' ? `One step for today. ${step}` : step);
   return parts.filter(Boolean).join(' ');
+}
+
+/** A device voice for a non-English reply, or null so the browser picks one from the utterance's language. */
+export function voiceForLanguage<T extends VoiceLike>(voices: T[], language: string): T | null {
+  if (language === 'en') return null;
+  const matching = voices.filter((voice) => langOf(voice).startsWith(language));
+  return matching.find((voice) => langOf(voice) === `${language}-in`) ?? matching[0] ?? null;
 }
 
 /** Chrome stops utterances after about 15 seconds, so long text is spoken as a queue of short chunks. */

@@ -71,7 +71,12 @@ export async function POST(request: Request): Promise<Response> {
     const guidance = replyText(result.reply);
     appendSession(sessionId, [
       { role: 'user', content: message },
-      { role: 'assistant', content: guidance, citations: result.verses.map((verse) => `${verse.chapter}.${verse.verse}`) },
+      {
+        role: 'assistant',
+        content: guidance,
+        citations: result.verses.map((verse) => `${verse.chapter}.${verse.verse}`),
+        language: result.language,
+      },
     ]);
 
     return json({
@@ -79,6 +84,7 @@ export async function POST(request: Request): Promise<Response> {
       guidance,
       reply: result.reply,
       verses: result.verses,
+      language: result.language,
       crisis: crisisBlock(result.crisis),
       usage: { calls: result.calls },
     });

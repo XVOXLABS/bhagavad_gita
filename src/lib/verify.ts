@@ -1,6 +1,23 @@
 import { lookup, toDisplay, type DisplayVerse } from './corpus';
-import type { Situation } from './retrieve';
+import { DEVANAGARI_LANGUAGES, detectLanguage, isLanguage } from './language';
+import type { Intent, Situation } from './retrieve';
 import { isThemeId, themesFromText } from './themes';
+
+const INTENTS = new Set<Intent>([
+  'problem',
+  'follow_up',
+  'greeting',
+  'about_me',
+  'language_request',
+  'unclear',
+  'off_topic',
+  'harmful',
+]);
+
+/** Intents answered with a verse. Everything else gets a short conversational reply. */
+export function needsVerse(intent: Intent): boolean {
+  return intent === 'problem' || intent === 'follow_up';
+}
 
 const VERSE_REF = /\d{1,2}\s*\.\s*\d{1,3}/;
 const DEVANAGARI = /[ऀ-ॿ]/;
@@ -41,12 +58,40 @@ function text(value: unknown, max = 600): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
 }
 
-export function guidanceLeaks(guidance: string): boolean {
-  return VERSE_REF.test(guidance) || DEVANAGARI.test(guidance);
+function words(text: string): string[] {
+  return text
+    .replace(/[।॥|0-9.,;:!?'"()\-]+/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
 }
 
-export function fallbackSituation(message: string): Situation {
+/** True when three consecutive words of a verse's Sanskrit appear in the text. */
+function quotesSanskrit(text: string, sanskrit: string[]): boolean {
+  const haystack = ` ${words(text).join(' ')} `;
+  for (const verse of sanskrit) {
+    const tokens = words(verse);
+    for (let i = 0; i + 3 <= tokens.length; i += 1) {
+      if (haystack.includes(` ${tokens.slice(i, i + 3).join(' ')} `)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Verse numbers are never allowed. Devanagari is blocked unless the reply language is written in it;
+ * then only quoted Sanskrit from the cited verses counts as a leak.
+ */
+export function guidanceLeaks(guidance: string, language = 'en', sanskrit: string[] = []): boolean {
+  if (VERSE_REF.test(guidance)) return true;
+  if (!DEVANAGARI_LANGUAGES.has(language)) return DEVANAGARI.test(guidance);
+  return quotesSanskrit(guidance, sanskrit);
+}
+
+export function fallbackSituation(message: string, previousLanguage?: string): Situation {
+  const typed = detectLanguage(message);
   return {
+    intent: 'problem',
+    replyLanguage: typed !== 'en' ? typed : previousLanguage ?? 'en',
     emotions: [],
     situation: message.slice(0, 300),
     need: '',
@@ -56,21 +101,32 @@ export function fallbackSituation(message: string): Situation {
   };
 }
 
-export function parseSituation(raw: string, message: string): Situation {
+export function parseSituation(raw: string, message: string, previousLanguage?: string): Situation {
   const data = parseJsonObject(raw);
-  if (!data) return fallbackSituation(message);
+  if (!data) return fallbackSituation(message, previousLanguage);
   const emotions = Array.isArray(data.emotions) ? data.emotions.map((item) => text(item, 40)).filter(Boolean).slice(0, 3) : [];
   const themes = [...new Set(Array.isArray(data.themes) ? data.themes.filter(isThemeId) : [])]
     .filter((theme) => theme !== 'narrative')
     .slice(0, 3);
+  const crisis = data.crisis === true;
+  const intent: Intent = crisis ? 'problem' : INTENTS.has(data.intent as Intent) ? (data.intent as Intent) : 'problem';
+  const verse = needsVerse(intent);
   return {
+    intent,
+    replyLanguage: isLanguage(data.replyLanguage) ? data.replyLanguage : fallbackSituation(message, previousLanguage).replyLanguage,
     emotions,
-    situation: text(data.situation, 300) || message.slice(0, 300),
+    situation: text(data.situation, 300) || (verse ? message.slice(0, 300) : ''),
     need: text(data.need, 200),
-    themes: themes.length > 0 ? themes : themesFromText(message),
-    crisis: data.crisis === true,
+    themes: verse ? (themes.length > 0 ? themes : themesFromText(message)) : [],
+    crisis,
     continuesPrevious: data.continuesPrevious === true,
   };
+}
+
+export function parseConversation(raw: string): string | null {
+  const data = parseJsonObject(raw);
+  const reply = data ? text(data.reply, 700) : '';
+  return reply || null;
 }
 
 export function parseSelection(raw: string): Selection | null {
@@ -128,8 +184,20 @@ export function parseReply(raw: string): Reply | null {
   return reply;
 }
 
-export function replyLeaks(reply: Reply): boolean {
-  return guidanceLeaks(reply.acknowledge) || guidanceLeaks(reply.connection) || guidanceLeaks(reply.step);
+export function replyLeaks(reply: Reply, language = 'en', sanskrit: string[] = []): boolean {
+  return [reply.acknowledge, reply.connection, reply.step].some((part) => guidanceLeaks(part, language, sanskrit));
+}
+
+const STOCK_OPENER =
+  /^(?:i (?:hear|see|understand)(?: you)?\s*[—–,:-]\s*|i (?:hear|see|understand)(?: that)?\s+(?=you)|it (?:sounds|seems) like\s+)/i;
+
+/** Models drift back to "I hear you…" despite the prompt; trim the stock opener so replies don't all start alike. */
+export function tidyOpener(text: string): string {
+  const match = text.match(STOCK_OPENER);
+  if (!match) return text;
+  const rest = text.slice(match[0].length).trim();
+  if (rest.length < 12) return text;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 export function replyText(reply: Reply): string {

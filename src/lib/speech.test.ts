@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chunkSentences, MAX_SILENT_TURNS, nextTalkState, pickVoice, speakableText, TALK_OFF, type TalkState } from './speech';
+import { chunkSentences, MAX_SILENT_TURNS, nextTalkState, pickVoice, speakableText, TALK_OFF, voiceForLanguage, type TalkState } from './speech';
 
 test('speakable text follows the reply order and drops Sanskrit and verse numbers', () => {
   const text = speakableText({
@@ -74,4 +74,19 @@ test('silence twice pauses, interrupt listens, failures pause, end stops', () =>
   assert.equal(state.mode, 'paused');
   assert.equal(state.note, 'Microphone blocked.');
   assert.equal(nextTalkState(state, { type: 'end' }).mode, 'off');
+});
+
+test('Hindi replies keep their Devanagari; other languages pick a matching voice', () => {
+  const hindi = speakableText({ acknowledge: 'आप अकेले नहीं हैं', connection: '', step: 'आज पाँच मिनट शांत बैठें' }, undefined, 'hi');
+  assert.ok(hindi.includes('आप अकेले नहीं हैं'));
+  assert.equal(hindi.includes('One step for today'), false);
+  const voices = [
+    { name: 'Microsoft Ravi', lang: 'en-IN' },
+    { name: 'Microsoft Valluvar', lang: 'ta-IN' },
+    { name: 'Google हिन्दी', lang: 'hi-IN' },
+  ];
+  assert.equal(voiceForLanguage(voices, 'ta')?.name, 'Microsoft Valluvar');
+  assert.equal(voiceForLanguage(voices, 'hi')?.name, 'Google हिन्दी');
+  assert.equal(voiceForLanguage(voices, 'te'), null);
+  assert.equal(voiceForLanguage(voices, 'en'), null);
 });

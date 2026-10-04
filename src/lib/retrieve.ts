@@ -33,7 +33,21 @@ const QUERY_GROUPS: string[][] = [
   ['financial', 'finance', 'money', 'wealth', 'riches'],
 ];
 
+/** What the message is. Only `problem` and `follow_up` get a verse. */
+export type Intent =
+  | 'problem'
+  | 'follow_up'
+  | 'greeting'
+  | 'about_me'
+  | 'language_request'
+  | 'unclear'
+  | 'off_topic'
+  | 'harmful';
+
 export type Situation = {
+  intent: Intent;
+  /** ISO 639-1 code of the language Krishna should reply in. */
+  replyLanguage: string;
   emotions: string[];
   situation: string;
   need: string;

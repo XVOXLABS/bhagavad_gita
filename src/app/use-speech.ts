@@ -1,7 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { chunkSentences, nextTalkState, pickVoice, TALK_OFF, VOICE_PITCH, VOICE_RATE, type TalkState } from '@/lib/speech';
+import {
+  chunkSentences,
+  nextTalkState,
+  pickVoice,
+  TALK_OFF,
+  voiceForLanguage,
+  VOICE_PITCH,
+  VOICE_RATE,
+  type TalkState,
+} from '@/lib/speech';
 
 export function readPref(key: string): string | null {
   try {
@@ -58,7 +67,7 @@ export function useKrishnaVoice() {
   }, []);
 
   const speak = useCallback(
-    (id: string, text: string, onDone?: () => void) => {
+    (id: string, text: string, onDone?: () => void, language = 'en') => {
       if (!('speechSynthesis' in window)) {
         onDone?.();
         return;
@@ -77,11 +86,17 @@ export function useKrishnaVoice() {
         setSpeakingId(null);
         onDone?.();
       };
+      const local = voiceForLanguage(voices, language);
       queue.current = chunks.map((chunk, index) => {
         const utterance = new SpeechSynthesisUtterance(chunk);
-        if (voice) {
+        if (language === 'en' && voice) {
           utterance.voice = voice;
           utterance.lang = voice.lang;
+        } else if (local) {
+          utterance.voice = local;
+          utterance.lang = local.lang;
+        } else {
+          utterance.lang = `${language}-IN`;
         }
         utterance.rate = VOICE_RATE;
         utterance.pitch = VOICE_PITCH;
@@ -94,7 +109,7 @@ export function useKrishnaVoice() {
       setSpeakingId(id);
       for (const utterance of queue.current) synth.speak(utterance);
     },
-    [voice],
+    [voice, voices],
   );
 
   return { supported, voices, voice, setVoice, speakingId, speak, stop };
@@ -200,7 +215,7 @@ export function useDictation(lang: string) {
   return { supported, listening, interim, start, stop, cancel };
 }
 
-export type TalkTurn = { speak: string; pause: boolean };
+export type TalkTurn = { speak: string; pause: boolean; language?: string };
 
 /**
  * Hands-free conversation: listen, send what was heard, speak the reply, listen again.
@@ -241,7 +256,7 @@ export function useTalkMode(
       void sendRef.current(text).then((reply) => {
         if (live.current.mode !== 'thinking') return;
         dispatch({ type: 'replied', pause: reply.pause });
-        speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }));
+        speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language);
       });
     });
   }, [state.mode, state.turn]);

@@ -5,11 +5,15 @@ import { lookup } from './corpus';
 import {
   citesOnlyPrior,
   evaluateSelection,
+  guidanceLeaks,
+  needsVerse,
+  parseConversation,
   parseReply,
   parseSelection,
   parseSituation,
   replyLeaks,
   replyText,
+  tidyOpener,
 } from './verify';
 
 test('copies 2.47 from the corpus and ignores scripture in the model payload', () => {
@@ -115,4 +119,48 @@ test('a new situation that repeats earlier verses asks for another verse', () =>
   assert.equal(citesOnlyPrior('I am afraid of the future', ['2.47', '2.48'], ['2.47', '2.48']), true);
   assert.equal(citesOnlyPrior('I am afraid of the future', ['2.47', '2.48'], ['2.47', '18.66']), false);
   assert.equal(citesOnlyPrior('tell me more about that verse', ['2.47'], ['2.47']), false);
+});
+
+test('intent decides whether a verse is needed, and crisis always gets one', () => {
+  const greeting = parseSituation(JSON.stringify({ intent: 'greeting', replyLanguage: 'en', themes: ['grief-loss'] }), 'hey');
+  assert.equal(greeting.intent, 'greeting');
+  assert.equal(needsVerse(greeting.intent), false);
+  assert.deepEqual(greeting.themes, []);
+  assert.equal(greeting.situation, '');
+
+  assert.equal(parseSituation(JSON.stringify({ intent: 'nonsense' }), 'x').intent, 'problem');
+  const crisis = parseSituation(JSON.stringify({ intent: 'greeting', crisis: true }), 'bye forever');
+  assert.equal(crisis.intent, 'problem');
+  assert.equal(needsVerse(crisis.intent), true);
+});
+
+test('reply language comes from the model, else the script, else the earlier conversation', () => {
+  assert.equal(parseSituation(JSON.stringify({ intent: 'language_request', replyLanguage: 'ta' }), 'speak tamil').replyLanguage, 'ta');
+  assert.equal(parseSituation('garbage', 'நீ தமிழ்ல பேசு').replyLanguage, 'ta');
+  assert.equal(parseSituation('garbage', 'ok tell me more', 'hi').replyLanguage, 'hi');
+  assert.equal(parseSituation(JSON.stringify({ replyLanguage: 'xx' }), 'hello').replyLanguage, 'en');
+});
+
+test('Devanagari is fine in a Hindi reply but quoted Sanskrit is not', () => {
+  const sanskrit = lookup(2, 47)?.sanskrit ?? '';
+  assert.equal(guidanceLeaks('आप अपना काम पूरे मन से करें।', 'hi', [sanskrit]), false);
+  assert.equal(guidanceLeaks('आप अपना काम पूरे मन से करें।', 'en', [sanskrit]), true);
+  const quote = sanskrit.split(/\s+/).slice(0, 4).join(' ');
+  assert.equal(guidanceLeaks(`याद रखें: ${quote}`, 'hi', [sanskrit]), true);
+  assert.equal(guidanceLeaks('நீங்கள் தனியாக இல்லை.', 'ta'), false);
+  assert.equal(guidanceLeaks('See 2.47 today.', 'ta'), true);
+});
+
+test('a conversational reply is parsed or rejected', () => {
+  assert.equal(parseConversation(JSON.stringify({ reply: ' Hello, friend. ' })), 'Hello, friend.');
+  assert.equal(parseConversation('{"reply": ""}'), null);
+  assert.equal(parseConversation('not json'), null);
+});
+
+test('stock openers are trimmed but real sentences are kept', () => {
+  assert.equal(tidyOpener('I hear you—you feel unheard at home.'), 'You feel unheard at home.');
+  assert.equal(tidyOpener('I see you failed your exam and your parents are angry.'), 'You failed your exam and your parents are angry.');
+  assert.equal(tidyOpener('It sounds like the week has been heavy.'), 'The week has been heavy.');
+  assert.equal(tidyOpener('I see.'), 'I see.');
+  assert.equal(tidyOpener('Losing a parent changes everything.'), 'Losing a parent changes everything.');
 });

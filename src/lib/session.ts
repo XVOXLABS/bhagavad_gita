@@ -2,7 +2,17 @@ export type SessionMessage = {
   role: 'user' | 'assistant';
   content: string;
   citations?: string[];
+  /** Language code the assistant replied in, so the next turn keeps it. */
+  language?: string;
 };
+
+export function lastLanguage(history: SessionMessage[]): string | undefined {
+  return [...history].reverse().find((turn) => turn.role === 'assistant' && turn.language)?.language;
+}
+
+export function lastCitations(history: SessionMessage[]): string[] {
+  return [...history].reverse().find((turn) => turn.role === 'assistant' && turn.citations?.length)?.citations ?? [];
+}
 
 const MAX_MESSAGES = 8;
 
