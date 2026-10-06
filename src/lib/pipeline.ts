@@ -13,6 +13,7 @@ import {
 } from './prompt';
 import { buildShortlist, queryText, type Shortlist, type Situation } from './retrieve';
 import { mentionsCrisis } from './safety';
+import { CONVERSE_KEYS, REPLY_KEYS, SentenceGate, type PipelineEvent } from './stream-reply';
 import { lastCitations, lastLanguage, type SessionMessage } from './session';
 import {
   citesOnlyPrior,
@@ -46,6 +47,8 @@ export type ChatResult = {
   };
 };
 
+export type Emit = (event: PipelineEvent) => void;
+
 const EMPTY_REPLY: Reply = { acknowledge: '', connection: '', step: '' };
 
 function refsOf(verses: DisplayVerse[]): string[] {
@@ -60,11 +63,28 @@ function versesFor(refs: string[]): DisplayVerse[] {
   });
 }
 
-export async function respond(message: string, history: SessionMessage[]): Promise<ChatResult> {
+/** Streams verified sentences of a JSON reply to `emit` as the model writes it; null when not streaming. */
+function streamer(emit: Emit | undefined, keys: typeof REPLY_KEYS, language: string, sanskrit: string[] = []) {
+  if (!emit) return null;
+  const gate = new SentenceGate(keys, language, sanskrit);
+  return {
+    gate,
+    onText: (soFar: string) => {
+      for (const delta of gate.push(soFar)) emit({ type: 'delta', ...delta });
+    },
+  };
+}
+
+/**
+ * Runs the whole reply. With `emit`, progress, the chosen verse and the reply's verified sentences are
+ * reported as they happen; the returned result is still the final, authoritative reply.
+ */
+export async function respond(message: string, history: SessionMessage[], emit?: Emit): Promise<ChatResult> {
   let calls = 0;
   const priorRefs = [...new Set(history.flatMap((turn) => turn.citations ?? []))];
   const previousLanguage = lastLanguage(history);
 
+  emit?.({ type: 'stage', stage: 'understanding' });
   let situation: Situation;
   try {
     calls += 1;
@@ -84,14 +104,19 @@ export async function respond(message: string, history: SessionMessage[]): Promi
     situation.intent === 'language_request' && lastCitations(history).length > 0 && previousLanguage !== language;
 
   if (!needsVerse(situation.intent) && !restate) {
+    emit?.({ type: 'stage', stage: 'writing' });
+    const live = streamer(emit, CONVERSE_KEYS, language);
     let text: string | null = null;
     try {
       calls += 1;
-      text = parseConversation(await writeConversation(message, history, situation));
+      text = parseConversation(await writeConversation(message, history, situation, live?.onText));
     } catch (error) {
       console.info(JSON.stringify({ event: 'converse_failed', detail: safeErrorMessage(error) }));
     }
-    if (!text || guidanceLeaks(text, language)) text = FALLBACK_CONVERSE;
+    if (!text || live?.gate.leaked || guidanceLeaks(text, language)) {
+      if (live?.gate.emitted) emit?.({ type: 'reset' });
+      text = FALLBACK_CONVERSE;
+    }
     text = tidyOpener(text);
     return {
       status: 'conversation',
@@ -108,6 +133,7 @@ export async function respond(message: string, history: SessionMessage[]): Promi
   if (restate) {
     verses = versesFor(lastCitations(history));
   } else {
+    emit?.({ type: 'stage', stage: 'searching' });
     const queryVector = await embedQuery(queryText(message, situation));
     const shortlist = buildShortlist({
       message,
@@ -131,6 +157,7 @@ export async function respond(message: string, history: SessionMessage[]): Promi
     }
 
     let chosen: { result: SelectionResult; reason: string } | null;
+    emit?.({ type: 'stage', stage: 'choosing' });
     try {
       chosen = await select();
       if (!chosen || chosen.result.status === 'needs_citations') {
@@ -158,11 +185,18 @@ export async function respond(message: string, history: SessionMessage[]): Promi
   const sanskrit = verses.map((verse) => verse.sanskrit);
   const baseNote = restate ? RESTATE_NOTE : undefined;
 
+  emit?.({ type: 'verses', verses, crisis });
+  emit?.({ type: 'stage', stage: 'writing' });
+  // With no verse the connection is dropped below, so it is never streamed either.
+  const keys = verses.length > 0 ? REPLY_KEYS : REPLY_KEYS.filter((entry) => entry.field !== 'connection');
+  const live = streamer(emit, keys, language, sanskrit);
+
   let reply: Reply | null = null;
   try {
     calls += 1;
-    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote));
-    if (!reply || replyLeaks(reply, language, sanskrit)) {
+    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote, live?.onText));
+    if (!reply || live?.gate.leaked || replyLeaks(reply, language, sanskrit)) {
+      if (live?.gate.emitted) emit?.({ type: 'reset' });
       calls += 1;
       const note = [baseNote, reply ? RETRY_GUIDANCE_LEAK : RETRY_NOT_JSON].filter(Boolean).join('\n\n');
       reply = parseReply(await writeReply(message, history, situation, verses, crisis, note));

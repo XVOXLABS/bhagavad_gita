@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test src/lib/corpus.test.ts src/lib/verify.test.ts src/lib/retrieve.test.ts src/lib/safety.test.ts src/lib/speech.test.ts src/lib/language.test.ts src/lib/elevenlabs.test.ts src/lib/rate-limit.test.ts src/lib/daily.test.ts",
+    "test": "tsx --test src/lib/corpus.test.ts src/lib/verify.test.ts src/lib/retrieve.test.ts src/lib/safety.test.ts src/lib/speech.test.ts src/lib/language.test.ts src/lib/elevenlabs.test.ts src/lib/rate-limit.test.ts src/lib/daily.test.ts src/lib/stream-reply.test.ts",
     "enrich": "tsx scripts/enrich-verses.ts",
     "embed": "tsx scripts/embed-verses.ts",
     "eval": "tsx scripts/run-eval.ts"

@@ -66,6 +66,67 @@ async function complete(
   return text;
 }
 
+type GroqChunkUsage = { x_groq?: { usage?: { prompt_tokens?: number; completion_tokens?: number } } };
+
+/**
+ * The same request as complete(), streamed: onText gets the text generated so far after every chunk.
+ * Returns the full text, which callers parse and verify exactly as before.
+ */
+async function completeStream(
+  step: string,
+  system: string,
+  turns: Turn[],
+  options: { temperature: number; maxTokens: number },
+  onText: (soFar: string) => void,
+): Promise<string> {
+  const model = modelName();
+  const request = (json: boolean) =>
+    getClient().chat.completions.create({
+      model,
+      stream: true,
+      temperature: options.temperature,
+      max_completion_tokens: options.maxTokens,
+      ...(json ? { response_format: { type: 'json_object' as const } } : {}),
+      ...(model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' as const } : {}),
+      messages: [{ role: 'system', content: system }, ...turns],
+    });
+
+  let stream;
+  try {
+    stream = await request(true);
+  } catch (error) {
+    // Some providers refuse JSON mode while streaming; the prompt still asks for JSON and the parser checks it.
+    if ((error as { status?: number }).status !== 400) throw error;
+    stream = await request(false);
+  }
+
+  let text = '';
+  let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
+  for await (const chunk of stream) {
+    const piece = chunk.choices[0]?.delta?.content;
+    if (piece) {
+      text += piece;
+      onText(text);
+    }
+    usage = (chunk as GroqChunkUsage).x_groq?.usage ?? chunk.usage ?? usage;
+  }
+  text = text.trim();
+  if (!text) throw new Error(`The model returned an empty reply (${step})`);
+  if (typeof usage?.prompt_tokens === 'number') {
+    console.info(
+      JSON.stringify({
+        event: 'groq_usage',
+        step,
+        model,
+        streamed: true,
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+      }),
+    );
+  }
+  return text;
+}
+
 function recentHistory(history: SessionMessage[], limit = 6): Turn[] {
   return history.slice(-limit).map((turn) => ({ role: turn.role, content: turn.content }));
 }
@@ -98,12 +159,18 @@ export async function extractSituation(message: string, history: SessionMessage[
   });
 }
 
-export async function writeConversation(message: string, history: SessionMessage[], situation: Situation): Promise<string> {
+export async function writeConversation(
+  message: string,
+  history: SessionMessage[],
+  situation: Situation,
+  onText?: (soFar: string) => void,
+): Promise<string> {
   const content = [`Intent: ${situation.intent}`, languageNote(languageName(situation.replyLanguage)), quoted(message)].join('\n\n');
-  return complete('converse', CONVERSE_PROMPT, [...recentHistory(history, 4), { role: 'user', content }], {
-    temperature: 0.5,
-    maxTokens: 400,
-  });
+  const turns: Turn[] = [...recentHistory(history, 4), { role: 'user', content }];
+  const options = { temperature: 0.5, maxTokens: 400 };
+  return onText
+    ? completeStream('converse', CONVERSE_PROMPT, turns, options, onText)
+    : complete('converse', CONVERSE_PROMPT, turns, options);
 }
 
 export async function selectVerses(
@@ -147,6 +214,7 @@ export async function writeReply(
   verses: DisplayVerse[],
   crisis: boolean,
   note?: string,
+  onText?: (soFar: string) => void,
 ): Promise<string> {
   const parts = [
     describeSituation(situation, false),
@@ -158,10 +226,9 @@ export async function writeReply(
   if (crisis) parts.push(CRISIS_NOTE);
   if (note) parts.push(note);
   parts.push(quoted(message));
-  return complete(
-    'write',
-    WRITE_PROMPT,
-    [...recentHistory(history), { role: 'user', content: parts.join('\n\n') }],
-    { temperature: 0.6, maxTokens: 1400 },
-  );
+  const turns: Turn[] = [...recentHistory(history), { role: 'user', content: parts.join('\n\n') }];
+  const options = { temperature: 0.6, maxTokens: 1400 };
+  return onText
+    ? completeStream('write', WRITE_PROMPT, turns, options, onText)
+    : complete('write', WRITE_PROMPT, turns, options);
 }

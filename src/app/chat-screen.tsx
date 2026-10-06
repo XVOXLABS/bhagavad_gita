@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
 import { speakableText } from '@/lib/speech';
@@ -50,6 +51,49 @@ type Reply = { acknowledge: string; connection: string; step: string };
 
 type Crisis = { message: string; helplines: { name: string; number: string; note: string }[] } | null;
 
+type Stage = 'understanding' | 'searching' | 'choosing' | 'writing';
+
+/** Lines of the streamed /api/chat response; "done" carries the same body as the plain JSON reply. */
+type StreamEvent =
+  | { type: 'stage'; stage: Stage }
+  | { type: 'verses'; verses: DisplayVerse[]; crisis: Crisis }
+  | { type: 'delta'; field: keyof Reply; text: string }
+  | { type: 'reset' }
+  | ({ type: 'done' } & ChatResponse);
+
+const STAGE_LABELS: Record<Stage, string> = {
+  understanding: 'Krishna is listening',
+  searching: 'Finding a verse for you',
+  choosing: 'Choosing the verse',
+  writing: 'Krishna is writing',
+};
+
+/** Reads NDJSON events as they arrive and resolves with the final "done" body. */
+async function readStream(body: ReadableStream<Uint8Array>, onEvent: (event: StreamEvent) => void): Promise<ChatResponse | null> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let done: ChatResponse | null = null;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as StreamEvent;
+    if (event.type === 'done') done = event;
+    else onEvent(event);
+  };
+  for (;;) {
+    const { value, done: finished } = await reader.read();
+    if (finished) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline: number;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      handle(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+    }
+  }
+  handle(buffer + decoder.decode());
+  return done;
+}
+
 type ChatStatus = 'answered' | 'no_strong_match' | 'conversation' | 'unavailable';
 
 type ChatResponse = {
@@ -74,6 +118,8 @@ type UiMessage =
       language: string;
       status: 'answered' | 'no_strong_match' | 'conversation';
       replyId?: string;
+      /** True while the reply is still arriving; Listen waits for the finished reply. */
+      streaming?: boolean;
     }
   | { id: string; role: 'error'; text: string; crisis: Crisis };
 
@@ -154,6 +200,19 @@ function CrisisCard({ crisis }: { crisis: NonNullable<Crisis> }) {
   );
 }
 
+function ThinkingLine({ label }: { label: string }) {
+  return (
+    <p className="thinking" role="status">
+      {label}
+      <span className="thinking-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </p>
+  );
+}
+
 function VerseCard({ verse, label, actions }: { verse: DisplayVerse; label?: string; actions?: VerseActions }) {
   const extra = verse.transliteration || verse.hindiMeaning || verse.wordMeanings;
   const showTranslationInline = !verse.summary && verse.englishTranslation;
@@ -163,7 +222,9 @@ function VerseCard({ verse, label, actions }: { verse: DisplayVerse; label?: str
         <div>
           <p className="verse-kicker">{label ?? 'Bhagavad Gita'}</p>
           <p className="verse-ref">
-            Chapter {verse.chapter} · Verse {verse.verse}
+            <Link href={`/gita/${verse.chapter}#v${verse.verse}`} className="verse-ref-link">
+              Chapter {verse.chapter} · Verse {verse.verse}
+            </Link>
             {verse.themes?.[0] ? <span className="verse-yoga"> · {verse.themes[0]}</span> : null}
           </p>
         </div>
@@ -295,6 +356,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<'send' | 'reset' | null>(null);
+  const [stage, setStage] = useState<Stage>('understanding');
   const [formError, setFormError] = useState('');
   const [autoPlay, setAutoPlay] = useState(false);
   const [micLang, setMicLang] = useState('en-IN');
@@ -334,6 +396,24 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
     if (messages.length > 0 || pending === 'send') endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, pending]);
 
+  // Follow a reply while it streams in, unless the person has scrolled up to read something else.
+  const followRef = useRef(true);
+  useEffect(() => {
+    const onScroll = () => {
+      followRef.current = document.documentElement.scrollHeight - window.innerHeight - window.scrollY < 160;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  const last = messages[messages.length - 1];
+  const streamSize =
+    last?.role === 'assistant' && last.streaming
+      ? last.reply.acknowledge.length + last.reply.connection.length + last.reply.step.length + last.verses.length * 1000 + (last.crisis ? 1 : 0)
+      : 0;
+  useEffect(() => {
+    if (streamSize > 0 && followRef.current) endRef.current?.scrollIntoView({ block: 'end' });
+  }, [streamSize]);
+
   useEffect(() => {
     const box = textareaRef.current;
     if (!box) return;
@@ -364,30 +444,67 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
     setView('chat');
     if (!fromTalk) setDraft('');
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: message }]);
+    setStage('understanding');
+
+    // The reply appears as one message that fills in while it streams, then is replaced by the final reply.
+    const id = crypto.randomUUID();
+    const withoutDraft = (current: UiMessage[]) => current.filter((item) => item.id !== id);
+    const patchDraft = (change: (item: Extract<UiMessage, { role: 'assistant' }>) => Extract<UiMessage, { role: 'assistant' }>) =>
+      setMessages((current) => {
+        const index = current.findIndex((item) => item.id === id);
+        if (index < 0) {
+          const empty = {
+            id,
+            role: 'assistant' as const,
+            reply: { acknowledge: '', connection: '', step: '' },
+            verses: [],
+            crisis: null,
+            language: 'en',
+            status: 'answered' as const,
+            streaming: true,
+          };
+          return [...current, change(empty)];
+        }
+        const item = current[index];
+        if (item.role !== 'assistant') return current;
+        const next = [...current];
+        next[index] = change(item);
+        return next;
+      });
+    const onEvent = (event: StreamEvent) => {
+      if (event.type === 'stage') setStage(event.stage);
+      else if (event.type === 'verses') {
+        if (event.verses.length > 0 || event.crisis) patchDraft((item) => ({ ...item, verses: event.verses, crisis: event.crisis }));
+      } else if (event.type === 'delta') {
+        patchDraft((item) => ({ ...item, reply: { ...item.reply, [event.field]: item.reply[event.field] + event.text } }));
+      } else if (event.type === 'reset') {
+        patchDraft((item) => ({ ...item, reply: { acknowledge: '', connection: '', step: '' } }));
+      }
+    };
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, message }),
+        body: JSON.stringify({ sessionId, message, stream: true }),
       });
-      const data = (await response.json()) as ChatResponse;
-      if (!response.ok || data.status === 'unavailable') {
-        const crisis = data.crisis ?? null;
+      const streamed = response.ok && response.body && (response.headers.get('content-type') ?? '').includes('ndjson');
+      const data = streamed ? await readStream(response.body!, onEvent) : ((await response.json()) as ChatResponse);
+      if (!data || !response.ok || data.status === 'unavailable') {
+        const crisis = data?.crisis ?? null;
         setMessages((current) => [
-          ...current,
-          { id: crypto.randomUUID(), role: 'error', text: data.error || data.guidance || UNAVAILABLE_TEXT, crisis },
+          ...withoutDraft(current),
+          { id: crypto.randomUUID(), role: 'error', text: data?.error || data?.guidance || UNAVAILABLE_TEXT, crisis },
         ]);
         return { speak: crisis ? `${crisis.message} ${UNAVAILABLE_SPOKEN}` : UNAVAILABLE_SPOKEN, pause: true };
       }
-      const id = crypto.randomUUID();
       const reply = data.reply ?? { acknowledge: data.guidance, connection: '', step: '' };
       const crisis = data.crisis ?? null;
       const language = data.language ?? 'en';
       const status = data.status === 'no_strong_match' || data.status === 'conversation' ? data.status : 'answered';
       const replyId = data.replyId;
       setMessages((current) => [
-        ...current,
+        ...withoutDraft(current),
         { id, role: 'assistant', reply, verses: data.verses ?? [], crisis, language, status, replyId },
       ]);
       const spoken = speakableText(reply, crisis?.message, language);
@@ -395,7 +512,10 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
       if (!fromTalk && autoPlayRef.current && voice.supported) voice.speak(id, spoken, undefined, language, remoteUrl);
       return { speak: spoken, pause: Boolean(crisis), language, remoteUrl };
     } catch {
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null }]);
+      setMessages((current) => [
+        ...withoutDraft(current),
+        { id: crypto.randomUUID(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null },
+      ]);
       return { speak: UNAVAILABLE_SPOKEN, pause: true };
     } finally {
       setPending(null);
@@ -516,6 +636,9 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
             </span>
           </button>
           <nav className="top-actions" aria-label="App">
+            <Link href="/gita" className="icon-btn" aria-label="Read the Gita, chapter by chapter" title="Read the Gita">
+              <BookIcon />
+            </Link>
             <IconButton
               label={view === 'saved' ? 'Back to conversation' : 'My Gita: saved verses'}
               pressed={view === 'saved'}
@@ -688,6 +811,22 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                 <VerseCard verse={daily} label="Today’s verse" actions={actionsFor(daily)} />
               </section>
             ) : null}
+
+            <section aria-labelledby="read-title">
+              <h2 id="read-title" className="section-label">
+                <BookIcon width={16} height={16} /> Read the Gita
+              </h2>
+              <Link href="/gita" className="chapter-card">
+                <span className="chapter-num" aria-hidden="true">
+                  18
+                </span>
+                <span className="chapter-body">
+                  <span className="chapter-name">All 18 chapters, verse by verse</span>
+                  <span className="chapter-about">Sanskrit, meaning, translation and word meanings for every verse.</span>
+                </span>
+                <ChevronIcon className="chapter-chevron" />
+              </Link>
+            </section>
           </div>
         ) : (
           <section className="thread" aria-live="polite" aria-label="Conversation">
@@ -713,13 +852,29 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                 );
               }
               const speaking = voice.speakingId === item.id;
+              // While streaming, a cursor follows the last part that has text so far.
+              const caretOn = !item.streaming
+                ? null
+                : item.reply.step
+                  ? 'step'
+                  : item.reply.connection
+                    ? 'connection'
+                    : item.reply.acknowledge
+                      ? 'acknowledge'
+                      : null;
+              const caret = <span className="stream-caret" aria-hidden="true" />;
               return (
-                <article key={item.id} className="msg msg-krishna" lang={item.language}>
+                <article
+                  key={item.id}
+                  className={`msg msg-krishna ${item.streaming ? 'is-streaming' : ''}`}
+                  lang={item.language}
+                  aria-busy={item.streaming || undefined}
+                >
                   <KrishnaMark className="avatar" />
                   <div className="msg-body">
                     <div className="msg-head">
                       <span className="msg-name">Krishna</span>
-                      {voice.supported && !talking ? (
+                      {voice.supported && !talking && !item.streaming ? (
                         <button
                           type="button"
                           className={`listen ${speaking ? 'is-playing' : ''}`}
@@ -742,11 +897,21 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                       ) : null}
                     </div>
                     {item.crisis ? <CrisisCard crisis={item.crisis} /> : null}
-                    {item.reply.acknowledge ? <p className="krishna-words">{item.reply.acknowledge}</p> : null}
+                    {item.reply.acknowledge ? (
+                      <p className="krishna-words">
+                        {item.reply.acknowledge}
+                        {caretOn === 'acknowledge' ? caret : null}
+                      </p>
+                    ) : null}
                     {item.verses.map((verse) => (
                       <VerseCard key={verseRef(verse)} verse={verse} actions={actionsFor(verse)} />
                     ))}
-                    {item.reply.connection ? <p className="krishna-words">{item.reply.connection}</p> : null}
+                    {item.reply.connection ? (
+                      <p className="krishna-words">
+                        {item.reply.connection}
+                        {caretOn === 'connection' ? caret : null}
+                      </p>
+                    ) : null}
                     {item.reply.step ? (
                       <div className="practice">
                         <span className="practice-icon">
@@ -754,26 +919,23 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                         </span>
                         <div>
                           <p className="practice-label">Today’s practice</p>
-                          <p className="practice-text">{item.reply.step}</p>
+                          <p className="practice-text">
+                            {item.reply.step}
+                            {caretOn === 'step' ? caret : null}
+                          </p>
                         </div>
                       </div>
                     ) : null}
+                    {item.streaming && !caretOn ? <ThinkingLine label={STAGE_LABELS[stage]} /> : null}
                   </div>
                 </article>
               );
             })}
-            {pending === 'send' && !talking ? (
-              <div className="msg msg-krishna" role="status">
+            {pending === 'send' && !talking && !(last?.role === 'assistant' && last.streaming) ? (
+              <div className="msg msg-krishna">
                 <KrishnaMark className="avatar" />
                 <div className="msg-body">
-                  <p className="thinking">
-                    Krishna is reflecting
-                    <span className="thinking-dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </p>
+                  <ThinkingLine label={STAGE_LABELS[stage]} />
                 </div>
               </div>
             ) : null}
