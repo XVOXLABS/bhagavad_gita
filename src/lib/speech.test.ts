@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chunkSentences, MAX_SILENT_TURNS, nextTalkState, pickVoice, speakableText, TALK_OFF, voiceForLanguage, type TalkState } from './speech';
+import {
+  chunkSentences,
+  MAX_SILENT_TURNS,
+  nextTalkState,
+  nextVadState,
+  pickVoice,
+  speakableText,
+  startVad,
+  TALK_OFF,
+  VAD,
+  voiceForLanguage,
+  type TalkState,
+} from './speech';
 
 test('speakable text follows the reply order and drops Sanskrit and verse numbers', () => {
   const text = speakableText({
@@ -89,4 +101,27 @@ test('Hindi replies keep their Devanagari; other languages pick a matching voice
   assert.equal(voiceForLanguage(voices, 'hi')?.name, 'Google हिन्दी');
   assert.equal(voiceForLanguage(voices, 'te'), null);
   assert.equal(voiceForLanguage(voices, 'en'), null);
+});
+
+test('voice activity: stops after a pause that follows speech, or when nothing is said', () => {
+  let vad = startVad(0);
+  vad = nextVadState(vad, 0.2, 300);
+  assert.equal(vad.heardSpeech, true);
+  vad = nextVadState(vad, 0.001, 1000);
+  assert.equal(vad.stop, false);
+  vad = nextVadState(vad, 0.001, 300 + VAD.silenceAfterSpeechMs);
+  assert.equal(vad.stop, true);
+  assert.equal(vad.reason, 'silence');
+
+  let quiet = startVad(0);
+  quiet = nextVadState(quiet, 0.001, 3000);
+  assert.equal(quiet.stop, false);
+  quiet = nextVadState(quiet, 0.001, VAD.noSpeechMs);
+  assert.equal(quiet.reason, 'no-speech');
+
+  let manual = nextVadState(startVad(0), 0.2, 100, false);
+  manual = nextVadState(manual, 0.001, 5000, false);
+  assert.equal(manual.stop, false);
+  manual = nextVadState(manual, 0.001, VAD.maxMs, false);
+  assert.equal(manual.reason, 'max');
 });

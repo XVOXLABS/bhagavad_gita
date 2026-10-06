@@ -4,7 +4,15 @@ export type SessionMessage = {
   citations?: string[];
   /** Language code the assistant replied in, so the next turn keeps it. */
   language?: string;
+  /** Lets the voice route speak exactly this reply and nothing else. */
+  replyId?: string;
+  speech?: string;
 };
+
+export function findReply(sessionId: string, replyId: string): { speech: string; language: string } | null {
+  const turn = getSession(sessionId).find((item) => item.role === 'assistant' && item.replyId === replyId);
+  return turn?.speech ? { speech: turn.speech, language: turn.language ?? 'en' } : null;
+}
 
 export function lastLanguage(history: SessionMessage[]): string | undefined {
   return [...history].reverse().find((turn) => turn.role === 'assistant' && turn.language)?.language;

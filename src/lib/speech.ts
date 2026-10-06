@@ -102,7 +102,33 @@ export function pickVoice<T extends VoiceLike>(voices: T[], saved?: string | nul
   );
 }
 
-export type TalkMode = 'off' | 'listening' | 'thinking' | 'speaking' | 'paused';
+export type VadState = { startedAt: number; heardSpeech: boolean; lastVoiceAt: number; stop: boolean; reason: '' | 'silence' | 'no-speech' | 'max' };
+
+export const VAD = {
+  /** RMS level (0-1) above which the frame counts as speech. */
+  speechLevel: 0.035,
+  silenceAfterSpeechMs: 1200,
+  noSpeechMs: 7000,
+  maxMs: 60_000,
+};
+
+export function startVad(now: number): VadState {
+  return { startedAt: now, heardSpeech: false, lastVoiceAt: now, stop: false, reason: '' };
+}
+
+/** Called for every audio frame while recording; says when to stop listening. */
+export function nextVadState(state: VadState, rms: number, now: number, autoStop = true): VadState {
+  if (state.stop) return state;
+  const voiced = rms >= VAD.speechLevel;
+  const next = { ...state, heardSpeech: state.heardSpeech || voiced, lastVoiceAt: voiced ? now : state.lastVoiceAt };
+  if (now - state.startedAt >= VAD.maxMs) return { ...next, stop: true, reason: 'max' };
+  if (!autoStop) return next;
+  if (next.heardSpeech && now - next.lastVoiceAt >= VAD.silenceAfterSpeechMs) return { ...next, stop: true, reason: 'silence' };
+  if (!next.heardSpeech && now - state.startedAt >= VAD.noSpeechMs) return { ...next, stop: true, reason: 'no-speech' };
+  return next;
+}
+
+export type TalkMode ='off' | 'listening' | 'thinking' | 'speaking' | 'paused';
 
 export type TalkState = {
   mode: TalkMode;

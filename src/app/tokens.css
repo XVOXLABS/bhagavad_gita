@@ -1,0 +1,152 @@
+/*
+ * Design tokens: "Night temple".
+ * Layer 1 primitives (raw values) -> layer 2 semantic (purpose) -> layer 3 component.
+ * Components use semantic or component tokens only, never primitives or raw hex.
+ */
+
+:root {
+  /* ---------- 1. Primitives ---------- */
+  --indigo-950: #060a1c;
+  --indigo-900: #0a1029;
+  --indigo-850: #0e1636;
+  --indigo-800: #131d45;
+  --indigo-700: #1b2857;
+  --indigo-600: #27376f;
+  --indigo-500: #3a4c8f;
+
+  --gold-100: #fbf0d2;
+  --gold-200: #f5e1ad;
+  --gold-300: #eccd85;
+  --gold-400: #e2b75c;
+  --gold-500: #c99a3c;
+  --gold-600: #a37a28;
+
+  --cream-50: #fcf8ef;
+  --cream-100: #f1e9d8;
+  --mist-300: #c3c8e2;
+  --mist-400: #9ba2c6;
+  --mist-500: #757ca3;
+
+  --peacock-400: #4fc1bb;
+  --peacock-600: #237d7a;
+  --leaf-400: #6fbf8e;
+  --saffron-400: #f0a35a;
+  --rose-300: #f6b3a5;
+  --rose-900: #3d1820;
+
+  --white-a04: rgba(255, 255, 255, 0.04);
+  --white-a06: rgba(255, 255, 255, 0.06);
+  --white-a10: rgba(255, 255, 255, 0.1);
+  --white-a14: rgba(255, 255, 255, 0.14);
+  --gold-a10: rgba(226, 183, 92, 0.1);
+  --gold-a16: rgba(226, 183, 92, 0.16);
+  --gold-a30: rgba(226, 183, 92, 0.3);
+  --gold-a45: rgba(226, 183, 92, 0.45);
+  --peacock-a08: rgba(79, 193, 187, 0.08);
+  --peacock-a30: rgba(79, 193, 187, 0.3);
+
+  --font-family-display: var(--font-serif), 'Georgia', serif;
+  --font-family-ui: var(--font-sans), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-family-sacred: var(--font-devanagari), 'Noto Serif Devanagari', serif;
+
+  --size-12: 0.75rem;
+  --size-13: 0.8125rem;
+  --size-14: 0.875rem;
+  --size-15: 0.9375rem;
+  --size-16: 1rem;
+  --size-17: 1.0625rem;
+  --size-19: 1.1875rem;
+  --size-22: 1.375rem;
+  --size-28: 1.75rem;
+  --size-36: 2.25rem;
+  --size-44: 2.75rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-20: 20px;
+  --radius-28: 28px;
+  --radius-full: 999px;
+
+  /* ---------- 2. Semantic ---------- */
+  --bg-app: var(--indigo-950);
+  --bg-glow: rgba(58, 76, 143, 0.55);
+  --surface-1: var(--indigo-900);
+  --surface-2: var(--indigo-850);
+  --surface-3: var(--indigo-800);
+  --surface-glass: rgba(10, 16, 41, 0.72);
+  --surface-hover: var(--white-a06);
+
+  --text-primary: var(--cream-100);
+  --text-strong: var(--cream-50);
+  --text-secondary: var(--mist-300);
+  --text-muted: var(--mist-500);
+  --text-sacred: var(--gold-200);
+  --text-accent: var(--gold-300);
+
+  --border-subtle: var(--white-a06);
+  --border-default: var(--white-a10);
+  --border-strong: var(--white-a14);
+  --border-accent: var(--gold-a30);
+
+  --accent: var(--gold-400);
+  --accent-hover: var(--gold-300);
+  --accent-soft: var(--gold-a10);
+  --accent-softer: var(--gold-a16);
+  --on-accent: var(--indigo-950);
+
+  --success: var(--leaf-400);
+  --danger: var(--rose-300);
+  --danger-surface: var(--rose-900);
+
+  --focus-ring: 0 0 0 3px var(--gold-a45);
+  --shadow-card: 0 1px 0 var(--white-a04) inset, 0 24px 48px -24px rgba(0, 0, 0, 0.7);
+  --shadow-float: 0 12px 40px -8px rgba(0, 0, 0, 0.6);
+  --glow-accent: 0 0 48px rgba(226, 183, 92, 0.28);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 240ms;
+
+  --content-width: 46rem;
+  --topbar-height: 64px;
+
+  /* ---------- 3. Component ---------- */
+  --button-primary-bg: var(--accent);
+  --button-primary-bg-hover: var(--accent-hover);
+  --button-primary-fg: var(--on-accent);
+  --button-ghost-fg: var(--text-secondary);
+  --button-ghost-bg-hover: var(--surface-hover);
+  --icon-button-size: 40px;
+
+  --card-bg: linear-gradient(180deg, rgba(27, 40, 87, 0.55), rgba(14, 22, 54, 0.75));
+  --card-border: var(--border-accent);
+  --card-radius: var(--radius-20);
+  --card-padding: var(--space-6);
+
+  --bubble-user-bg: var(--indigo-700);
+  --bubble-user-border: var(--border-default);
+  --bubble-user-fg: var(--text-strong);
+
+  --composer-bg: var(--surface-2);
+  --composer-border: var(--border-default);
+  --composer-radius: var(--radius-28);
+
+  --avatar-size: 36px;
+
+  --practice-bg: linear-gradient(135deg, var(--peacock-a08), rgba(58, 76, 143, 0.25));
+  --practice-border: var(--peacock-a30);
+  --practice-accent: var(--peacock-400);
+  --tile-bg: var(--surface-3);
+}

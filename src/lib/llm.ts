@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import type { DisplayVerse } from './corpus';
+import { redactEleven } from './elevenlabs';
 import { redactJina } from './embed';
 import { languageName } from './language';
 import { CONVERSE_PROMPT, CRISIS_NOTE, languageNote, SELECT_PROMPT, SITUATION_PROMPT, WRITE_PROMPT } from './prompt';
@@ -24,7 +25,7 @@ function getClient(): OpenAI {
 
 export function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : 'request failed';
-  return redactJina(message)
+  return redactEleven(redactJina(message))
     .replace(/AIza[\w-]+/g, '[redacted]')
     .replace(/sk-[A-Za-z0-9_-]+/g, '[redacted]')
     .replace(/gsk_[A-Za-z0-9]+/g, '[redacted]')

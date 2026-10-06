@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { safeErrorMessage } from '@/lib/llm';
+import { speakableText } from '@/lib/speech';
 import { respond } from '@/lib/pipeline';
 import { CRISIS_MESSAGE, HELPLINES, mentionsCrisis } from '@/lib/safety';
 import { appendSession, clearSession, getSession } from '@/lib/session';
@@ -69,6 +71,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const guidance = replyText(result.reply);
+    const replyId = randomUUID();
     appendSession(sessionId, [
       { role: 'user', content: message },
       {
@@ -76,6 +79,8 @@ export async function POST(request: Request): Promise<Response> {
         content: guidance,
         citations: result.verses.map((verse) => `${verse.chapter}.${verse.verse}`),
         language: result.language,
+        replyId,
+        speech: speakableText(result.reply, result.crisis ? CRISIS_MESSAGE : undefined, result.language),
       },
     ]);
 
@@ -83,6 +88,7 @@ export async function POST(request: Request): Promise<Response> {
       status: result.status,
       guidance,
       reply: result.reply,
+      replyId,
       verses: result.verses,
       language: result.language,
       crisis: crisisBlock(result.crisis),
