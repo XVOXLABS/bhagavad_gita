@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
 
 const SAVED_KEY = 'gita.saved';
+const SAVED_EVENT = 'gita-saved';
 const MAX_SAVED = 200;
 
 export function verseRef(verse: Pick<DisplayVerse, 'chapter' | 'verse'>): string {
@@ -23,6 +24,8 @@ function read(): DisplayVerse[] {
 function write(verses: DisplayVerse[]): void {
   try {
     window.localStorage.setItem(SAVED_KEY, JSON.stringify(verses));
+    // The storage event does not fire in the tab that wrote, so the nav can refresh too.
+    queueMicrotask(() => window.dispatchEvent(new Event(SAVED_EVENT)));
   } catch {
     // Storage blocked (private mode): saved verses last for this visit only.
   }
@@ -33,12 +36,17 @@ export function useSavedVerses() {
   const [saved, setSaved] = useState<DisplayVerse[]>([]);
 
   useEffect(() => {
-    setSaved(read());
+    const refresh = () => setSaved(read());
+    refresh();
     const onStorage = (event: StorageEvent) => {
-      if (event.key === SAVED_KEY) setSaved(read());
+      if (event.key === SAVED_KEY) refresh();
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    window.addEventListener(SAVED_EVENT, refresh);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(SAVED_EVENT, refresh);
+    };
   }, []);
 
   const isSaved = useCallback((verse: DisplayVerse) => saved.some((item) => verseRef(item) === verseRef(verse)), [saved]);

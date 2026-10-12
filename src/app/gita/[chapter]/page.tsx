@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { allChapters, chapterInfo, chapterVerses } from '@/lib/chapters';
 import type { DisplayVerse } from '@/lib/corpus';
 import { BackIcon, ChevronIcon, Lotus } from '../../icons';
+import { RememberChapter } from '../../reading';
 import { VerseTools } from '../verse-tools';
 
 type Params = Promise<{ chapter: string }>;
@@ -96,6 +97,7 @@ export default async function ChapterPage({ params }: { params: Params }) {
 
   return (
     <>
+      <RememberChapter chapter={info.number} name={info.name} />
       <Link href="/gita" className="reader-back">
         <BackIcon />
         All chapters

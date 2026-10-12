@@ -1,33 +1,27 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
 import { speakableText } from '@/lib/speech';
 import {
-  BackIcon,
-  BookIcon,
-  BookmarkIcon,
-  ChevronIcon,
   CloseIcon,
   CompassIcon,
   DiyaIcon,
   FlameIcon,
   KrishnaMark,
-  Lotus,
   MicIcon,
   NewChatIcon,
   PeacockFeather,
   RainIcon,
   SendIcon,
-  ShareIcon,
   SlidersIcon,
   StopIcon,
-  SunIcon,
   VolumeIcon,
 } from './icons';
 import { useSavedVerses, verseRef } from './saved';
 import { shareVerse } from './share-card';
+import { clearTalkDraft, readTalkDraft } from './talk-handoff';
+import { IconButton, VerseCard, type VerseActions } from './verse-card';
 import {
   micErrorMessage,
   readPref,
@@ -39,13 +33,6 @@ import {
   type Listener,
   type TalkTurn,
 } from './use-speech';
-
-type VerseActions = {
-  saved: boolean;
-  sharing: boolean;
-  onToggleSave: () => void;
-  onShare: () => void;
-};
 
 type Reply = { acknowledge: string; connection: string; step: string };
 
@@ -124,10 +111,10 @@ type UiMessage =
   | { id: string; role: 'error'; text: string; crisis: Crisis };
 
 const STARTERS = [
-  { icon: BookIcon, title: 'Exams and results', text: 'I am anxious about my exams and results' },
-  { icon: RainIcon, title: 'Grief and loss', text: 'I lost someone I love and the grief is heavy' },
-  { icon: FlameIcon, title: 'Anger', text: 'I get angry quickly and regret it later' },
-  { icon: CompassIcon, title: 'Purpose', text: 'I feel lost and do not know my purpose' },
+  { icon: RainIcon, title: 'Fear', text: 'I am afraid and I do not know what to do' },
+  { icon: CompassIcon, title: 'Duty', text: 'I know my duty but I do not want to do it' },
+  { icon: DiyaIcon, title: 'Grief', text: 'I lost someone I love and the grief is heavy' },
+  { icon: FlameIcon, title: 'A quarrel', text: 'I am in a quarrel and I cannot let it go' },
 ];
 
 const UNAVAILABLE_TEXT = 'The reply could not be completed. Please try again.';
@@ -147,39 +134,6 @@ const TALK_LABELS: Record<string, string> = {
   speaking: 'Krishna is speaking',
   paused: 'Paused',
 };
-
-function IconButton({
-  label,
-  onClick,
-  pressed,
-  disabled,
-  badge,
-  className,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  pressed?: boolean;
-  disabled?: boolean;
-  badge?: number;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={`icon-btn ${className ?? ''}`}
-      aria-label={label}
-      title={label}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-      {badge ? <span className="icon-badge">{badge > 99 ? '99+' : badge}</span> : null}
-    </button>
-  );
-}
 
 function CrisisCard({ crisis }: { crisis: NonNullable<Crisis> }) {
   return (
@@ -213,90 +167,6 @@ function ThinkingLine({ label }: { label: string }) {
   );
 }
 
-function VerseCard({ verse, label, actions }: { verse: DisplayVerse; label?: string; actions?: VerseActions }) {
-  const extra = verse.transliteration || verse.hindiMeaning || verse.wordMeanings;
-  const showTranslationInline = !verse.summary && verse.englishTranslation;
-  return (
-    <figure className="verse-card" lang="en">
-      <header className="verse-head">
-        <div>
-          <p className="verse-kicker">{label ?? 'Bhagavad Gita'}</p>
-          <p className="verse-ref">
-            <Link href={`/gita/${verse.chapter}#v${verse.verse}`} className="verse-ref-link">
-              Chapter {verse.chapter} · Verse {verse.verse}
-            </Link>
-            {verse.themes?.[0] ? <span className="verse-yoga"> · {verse.themes[0]}</span> : null}
-          </p>
-        </div>
-        {actions ? (
-          <div className="verse-tools">
-            <IconButton
-              label={actions.saved ? 'Remove from My Gita' : 'Save to My Gita'}
-              pressed={actions.saved}
-              onClick={actions.onToggleSave}
-              className="icon-btn-sm"
-            >
-              <BookmarkIcon filled={actions.saved} />
-            </IconButton>
-            <IconButton
-              label={actions.sharing ? 'Preparing image' : 'Share as image'}
-              disabled={actions.sharing}
-              onClick={actions.onShare}
-              className="icon-btn-sm"
-            >
-              <ShareIcon />
-            </IconButton>
-          </div>
-        ) : null}
-      </header>
-
-      <blockquote className="sanskrit" lang="sa">
-        {verse.sanskrit.replace(/।।\s*\d+\.\d+\s*।।/g, '॥').replace(/\n\s*\n+/g, '\n')}
-      </blockquote>
-
-      <Lotus className="verse-lotus" />
-
-      {verse.summary ? <p className="verse-meaning">{verse.summary}</p> : null}
-      {showTranslationInline ? <p className="verse-meaning">{verse.englishTranslation}</p> : null}
-
-      {(verse.englishTranslation && !showTranslationInline) || extra ? (
-        <details className="verse-more">
-          <summary>
-            <span>Translation and word meanings</span>
-            <ChevronIcon className="verse-more-chevron" />
-          </summary>
-          <div className="verse-more-body">
-            {verse.englishTranslation && !showTranslationInline ? (
-              <div>
-                <h4>Translation</h4>
-                <p>{verse.englishTranslation}</p>
-              </div>
-            ) : null}
-            {verse.transliteration ? (
-              <div>
-                <h4>Transliteration</h4>
-                <p>{verse.transliteration}</p>
-              </div>
-            ) : null}
-            {verse.hindiMeaning ? (
-              <div>
-                <h4>Hindi</h4>
-                <p lang="hi">{verse.hindiMeaning}</p>
-              </div>
-            ) : null}
-            {verse.wordMeanings ? (
-              <div>
-                <h4>Word meanings</h4>
-                <p>{verse.wordMeanings}</p>
-              </div>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
-    </figure>
-  );
-}
-
 function MicLevel({ level }: { level: number }) {
   return (
     <span className="mic-level" aria-hidden="true">
@@ -312,9 +182,8 @@ function voiceSortKey(voice: SpeechSynthesisVoice): string {
   return `${lang === 'en-in' ? 0 : lang.startsWith('en') ? 1 : 2}${voice.name}`;
 }
 
-export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
+export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse | null; withToday?: boolean }) {
   const [sessionId] = useState(() => crypto.randomUUID());
-  const [view, setView] = useState<'chat' | 'saved'>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sharingRef, setSharingRef] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -382,6 +251,17 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
   autoPlayRef.current = autoPlay;
 
   useEffect(() => {
+    if (!withToday) return;
+    const waiting = readTalkDraft();
+    if (waiting) setDraft(waiting);
+    const timer = window.setTimeout(() => {
+      if (waiting) textareaRef.current?.focus();
+      clearTalkDraft();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [withToday]);
+
+  useEffect(() => {
     setAutoPlay(readPref(AUTOPLAY_KEY) === '1');
     setNaturalPref(readPref(NATURAL_KEY) !== '0');
     const saved = readPref(MIC_LANG_KEY);
@@ -441,7 +321,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
     if (!message) return { speak: '', pause: true };
     setFormError('');
     setPending('send');
-    setView('chat');
+    clearTalkDraft();
     if (!fromTalk) setDraft('');
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: message }]);
     setStage('understanding');
@@ -548,7 +428,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
     if (talking) talk.end();
     setPending('reset');
     setFormError('');
-    setView('chat');
+    clearTalkDraft();
     try {
       await fetch('/api/chat', {
         method: 'POST',
@@ -625,44 +505,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
   const canSend = pending === null && draft.trim().length > 0;
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="topbar-inner">
-          <button type="button" className="brand" onClick={() => setView('chat')} aria-label="Speak with Krishna, home">
-            <KrishnaMark className="brand-mark" />
-            <span className="brand-text">
-              <span className="brand-name">Speak with Krishna</span>
-              <span className="brand-tag">Guidance from the Bhagavad Gita</span>
-            </span>
-          </button>
-          <nav className="top-actions" aria-label="App">
-            <Link href="/gita" className="icon-btn" aria-label="Read the Gita, chapter by chapter" title="Read the Gita">
-              <BookIcon />
-            </Link>
-            <IconButton
-              label={view === 'saved' ? 'Back to conversation' : 'My Gita: saved verses'}
-              pressed={view === 'saved'}
-              badge={view === 'saved' ? 0 : savedVerses.saved.length}
-              onClick={() => setView((current) => (current === 'saved' ? 'chat' : 'saved'))}
-            >
-              <BookmarkIcon filled={view === 'saved'} />
-            </IconButton>
-            {voice.supported || dictation.supported ? (
-              <IconButton label="Voice settings" pressed={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>
-                <SlidersIcon />
-              </IconButton>
-            ) : null}
-            <IconButton
-              label="New conversation"
-              disabled={pending !== null || messages.length === 0}
-              onClick={() => void startNewTopic()}
-            >
-              <NewChatIcon />
-            </IconButton>
-          </nav>
-        </div>
-      </header>
-
+    <>
       {settingsOpen ? (
         <>
           <button type="button" className="sheet-backdrop" aria-label="Close voice settings" onClick={() => setSettingsOpen(false)} />
@@ -731,50 +574,27 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
       ) : null}
 
       <main className="content">
-        {view === 'saved' ? (
-          <section className="saved" aria-labelledby="saved-title">
-            <div className="saved-head">
-              <IconButton label="Back to conversation" onClick={() => setView('chat')}>
-                <BackIcon />
-              </IconButton>
-              <div>
-                <h1 id="saved-title" className="page-title">
-                  My Gita
-                </h1>
-                <p className="page-sub">
-                  {savedVerses.saved.length === 1 ? '1 verse' : `${savedVerses.saved.length} verses`} saved on this device
-                </p>
-              </div>
-            </div>
-            {savedVerses.saved.length === 0 ? (
-              <div className="empty-state">
-                <Lotus className="empty-lotus" />
-                <h2>No verses saved yet</h2>
-                <p>Tap the bookmark on any verse that speaks to you, and it will wait for you here.</p>
-                <button type="button" className="btn btn-secondary" onClick={() => setView('chat')}>
-                  Return to the conversation
-                </button>
-              </div>
-            ) : (
-              <div className="saved-list">
-                {savedVerses.saved.map((verse) => (
-                  <VerseCard key={verseRef(verse)} verse={verse} actions={actionsFor(verse)} />
-                ))}
-              </div>
-            )}
-          </section>
-        ) : messages.length === 0 ? (
+        <div className="talk-tools">
+          {voice.supported || dictation.supported ? (
+            <IconButton label="Voice settings" pressed={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>
+              <SlidersIcon />
+            </IconButton>
+          ) : null}
+          <IconButton
+            label="New conversation"
+            disabled={pending !== null || messages.length === 0}
+            onClick={() => void startNewTopic()}
+          >
+            <NewChatIcon />
+          </IconButton>
+        </div>
+        {messages.length === 0 ? (
           <div className="home">
-            <section className="hero">
-              <div className="hero-emblem" aria-hidden="true">
-                <span className="hero-halo" />
-                <PeacockFeather className="hero-feather" />
-              </div>
-              <p className="hero-kicker">Jai Shri Krishna</p>
-              <h1 className="hero-title">What weighs on your heart today?</h1>
+            <section className="hero hero-quiet">
+              <p className="hero-kicker">Talk</p>
+              <h1 className="hero-title">{withToday ? 'What is heavy today?' : 'What is on your heart?'}</h1>
               <p className="hero-sub">
-                Share it in your own words. Krishna answers with a verse from the Bhagavad Gita and what it means for
-                you.
+                Say it in your own words. Krishna answers with a verse from the Bhagavad Gita.
               </p>
               {canTalk ? (
                 <button type="button" className="btn btn-primary btn-lg" onClick={startTalk}>
@@ -783,6 +603,15 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                 </button>
               ) : null}
             </section>
+
+            {withToday && daily ? (
+              <section className="daily" aria-labelledby="daily-title">
+                <h2 id="daily-title" className="section-label">
+                  Today’s verse
+                </h2>
+                <VerseCard verse={daily} label="Today’s verse" actions={actionsFor(daily)} />
+              </section>
+            ) : null}
 
             <section className="starters" aria-labelledby="starters-title">
               <h2 id="starters-title" className="section-label">
@@ -801,31 +630,6 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                   </button>
                 ))}
               </div>
-            </section>
-
-            {daily ? (
-              <section className="daily" aria-labelledby="daily-title">
-                <h2 id="daily-title" className="section-label">
-                  <SunIcon width={16} height={16} /> Verse of the day
-                </h2>
-                <VerseCard verse={daily} label="Today’s verse" actions={actionsFor(daily)} />
-              </section>
-            ) : null}
-
-            <section aria-labelledby="read-title">
-              <h2 id="read-title" className="section-label">
-                <BookIcon width={16} height={16} /> Read the Gita
-              </h2>
-              <Link href="/gita" className="chapter-card">
-                <span className="chapter-num" aria-hidden="true">
-                  18
-                </span>
-                <span className="chapter-body">
-                  <span className="chapter-name">All 18 chapters, verse by verse</span>
-                  <span className="chapter-about">Sanskrit, meaning, translation and word meanings for every verse.</span>
-                </span>
-                <ChevronIcon className="chapter-chevron" />
-              </Link>
             </section>
           </div>
         ) : (
@@ -950,7 +754,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
         </p>
       ) : null}
 
-      {view === 'chat' && !talking ? (
+      {!talking ? (
         <div className="dock">
           <form className="composer" onSubmit={onSubmit}>
             {dictation.listening || dictation.transcribing || formError ? (
@@ -992,7 +796,7 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
                 rows={1}
                 maxLength={2000}
                 value={draft}
-                placeholder="Share what is on your heart…"
+                placeholder={withToday ? 'What is heavy today…' : 'Share what is on your heart…'}
                 disabled={pending !== null}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -1054,6 +858,6 @@ export function ChatScreen({ daily }: { daily: DisplayVerse | null }) {
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

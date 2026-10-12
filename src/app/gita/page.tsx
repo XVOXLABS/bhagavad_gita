@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { allChapters } from '@/lib/chapters';
+import { ContinueReading } from '../reading';
 import { ChevronIcon, Lotus } from '../icons';
 
 export const metadata: Metadata = {
@@ -22,6 +23,8 @@ export default function ChaptersPage() {
         </p>
         <Lotus className="verse-lotus" />
       </header>
+
+      <ContinueReading />
 
       <ol className="chapter-grid">
         {chapters.map((chapter) => (
