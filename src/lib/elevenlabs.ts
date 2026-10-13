@@ -56,18 +56,28 @@ async function failure(response: Response): Promise<ElevenError> {
   return new ElevenError('failed', detail);
 }
 
-/** Streams Krishna's words as mp3 so playback can start before generation finishes. */
+export type SpeechFormat = 'mp3' | 'pcm';
+
+/** mp3 for the browser's own player; raw 16 kHz 16-bit mono PCM for the talking avatar. */
+export const OUTPUT_FORMATS: Record<SpeechFormat, string> = { mp3: 'mp3_44100_128', pcm: 'pcm_16000' };
+
+/** Streams Krishna's words so playback can start before generation finishes. */
 export async function streamSpeech(
   text: string,
   config: ElevenConfig = elevenConfig(),
   fetcher: typeof fetch = fetch,
+  format: SpeechFormat = 'mp3',
 ): Promise<ReadableStream<Uint8Array>> {
   if (!config.ttsEnabled) throw new ElevenError('disabled', 'ElevenLabs speech is not configured');
   const response = await fetcher(
-    `${API}/text-to-speech/${encodeURIComponent(config.voiceId)}/stream?output_format=mp3_44100_128`,
+    `${API}/text-to-speech/${encodeURIComponent(config.voiceId)}/stream?output_format=${OUTPUT_FORMATS[format]}`,
     {
       method: 'POST',
-      headers: { 'xi-api-key': config.apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+      headers: {
+        'xi-api-key': config.apiKey,
+        'Content-Type': 'application/json',
+        Accept: format === 'pcm' ? 'audio/pcm' : 'audio/mpeg',
+      },
       body: JSON.stringify({ text, model_id: config.ttsModel, voice_settings: KRISHNA_VOICE_SETTINGS }),
       signal: AbortSignal.timeout(30_000),
     },

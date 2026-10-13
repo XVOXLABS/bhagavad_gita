@@ -32,4 +32,7 @@ globalLimits.__gitaLimits ??= {
   stt: createLimiter(20, 10 * 60_000),
 };
 
+// Added after the first two, so a server that kept the old object across a reload still gets it.
+globalLimits.__gitaLimits.avatar ??= createLimiter(10, 10 * 60_000);
+
 export const limits = globalLimits.__gitaLimits;

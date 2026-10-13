@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { avatarEngine } from './avatar/anam-engine';
 import {
   chunkSentences,
   nextTalkState,
@@ -58,13 +59,14 @@ function silentWav(): string {
   return `data:audio/wav;base64,${btoa(binary)}`;
 }
 
-export type VoiceEngine = 'natural' | 'device';
+export type VoiceEngine = 'natural' | 'device' | 'avatar';
 
 /**
  * Krishna's voice. With `natural` on and a server reply URL, audio streams from ElevenLabs
  * through one shared <audio>; any failure falls back to the device voice with the same words.
  */
-export function useKrishnaVoice(natural = false) {
+/** `avatar`: when Krishna's live face is connected, replies are spoken through it (same voice, lips in sync). */
+export function useKrishnaVoice(natural = false, avatar = false) {
   const [supported, setSupported] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceName, setVoiceName] = useState<string | null>(null);
@@ -76,6 +78,8 @@ export function useKrishnaVoice(natural = false) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const naturalRef = useRef(natural);
   naturalRef.current = natural;
+  const avatarRef = useRef(avatar);
+  avatarRef.current = avatar;
 
   const audio = useCallback(() => {
     audioRef.current ??= new Audio();
@@ -108,6 +112,7 @@ export function useKrishnaVoice(natural = false) {
     queue.current = [];
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     audioRef.current?.pause();
+    avatarEngine().stop();
     setSpeakingId(null);
   }, []);
 
@@ -168,12 +173,9 @@ export function useKrishnaVoice(natural = false) {
     [voice, voices],
   );
 
-  const speak = useCallback(
-    (id: string, text: string, onDone?: () => void, language = 'en', remoteUrl?: string) => {
-      if (!remoteUrl || !naturalRef.current) {
-        speakDevice(id, text, onDone, language);
-        return;
-      }
+  /** The natural voice through the browser's audio player, falling back to the device voice. */
+  const speakAudio = useCallback(
+    (id: string, text: string, onDone: (() => void) | undefined, language: string, remoteUrl: string) => {
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       const element = audio();
       element.pause();
@@ -204,6 +206,43 @@ export function useKrishnaVoice(natural = false) {
         .catch(fallBack);
     },
     [audio, speakDevice],
+  );
+
+  const speak = useCallback(
+    (id: string, text: string, onDone?: () => void, language = 'en', remoteUrl?: string) => {
+      if (!remoteUrl || !naturalRef.current) {
+        speakDevice(id, text, onDone, language);
+        return;
+      }
+      const face = avatarEngine();
+      if (!avatarRef.current || face.state !== 'ready') {
+        speakAudio(id, text, onDone, language, remoteUrl);
+        return;
+      }
+      // Live face: the same ElevenLabs voice, as raw audio, with Krishna's lips moving to it.
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      audioRef.current?.pause();
+      const mine = ++token.current;
+      setSpeakingId(id);
+      const pcmUrl = `${remoteUrl}${remoteUrl.includes('?') ? '&' : '?'}format=pcm`;
+      void face
+        .speak(pcmUrl, {
+          onDone: () => {
+            if (token.current !== mine) return;
+            setSpeakingId(null);
+            onDone?.();
+          },
+          onLost: () => {
+            if (token.current === mine) speakAudio(id, text, onDone, language, remoteUrl);
+          },
+        })
+        .then((started) => {
+          if (token.current !== mine) return;
+          if (started) setLastEngine('avatar');
+          else speakAudio(id, text, onDone, language, remoteUrl);
+        });
+    },
+    [speakAudio, speakDevice],
   );
 
   return { supported: supported || natural, voices, voice, setVoice, speakingId, speak, stop, unlock, lastEngine };

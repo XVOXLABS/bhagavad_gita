@@ -1802,6 +1802,99 @@ a.brand {
   border-bottom-color: var(--border-accent);
 }
 
+/* ---------- Krishna's face ---------- */
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.krishna-face {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+}
+
+.krishna-face-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--surface-2);
+  box-shadow:
+    0 0 0 1px var(--border-accent),
+    0 0 80px rgba(226, 183, 92, 0.22);
+}
+
+.krishna-face-large .krishna-face-frame {
+  width: min(320px, 72vw);
+  aspect-ratio: 1;
+}
+
+.krishna-face-small .krishna-face-frame {
+  width: 132px;
+  aspect-ratio: 1;
+}
+
+.krishna-face-portrait,
+.krishna-face-stage,
+.krishna-face-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.krishna-face-stage {
+  opacity: 0;
+  transition: opacity 600ms var(--ease-out);
+}
+
+.krishna-face[data-live] .krishna-face-stage {
+  opacity: 1;
+}
+
+.krishna-face[data-state='connecting'] .krishna-face-portrait {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    transform: scale(1.025);
+    filter: brightness(1.08);
+  }
+}
+
+.krishna-face-note {
+  margin: 0;
+  font-size: var(--size-13);
+  color: var(--text-muted);
+}
+
+.face-card {
+  position: fixed;
+  z-index: 45;
+  right: var(--space-4);
+  bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px));
+  padding: var(--space-3);
+  background: var(--surface-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-20);
+  box-shadow: var(--shadow-float);
+  animation: rise var(--duration-base) var(--ease-out);
+}
+
+.face-card-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--surface-2);
+}
+
 /* ---------- Motion and small screens ---------- */
 
 @media (prefers-reduced-motion: reduce) {

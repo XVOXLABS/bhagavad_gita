@@ -33,6 +33,16 @@ test('speech request goes to the streaming endpoint with the key, model and voic
   assert.deepEqual(body.voice_settings, KRISHNA_VOICE_SETTINGS);
 });
 
+test('the avatar asks for raw 16 kHz PCM instead of mp3', async () => {
+  let seenUrl = '';
+  const fake = (async (url: string) => {
+    seenUrl = url;
+    return new Response(new Uint8Array([0, 0]), { status: 200 });
+  }) as unknown as typeof fetch;
+  await streamSpeech('Be steady.', config, fake, 'pcm');
+  assert.equal(seenUrl, 'https://api.elevenlabs.io/v1/text-to-speech/voice42/stream?output_format=pcm_16000');
+});
+
 test('quota and rate-limit errors are told apart, and keys are redacted', async () => {
   const status = (code: number, text: string) =>
     (async () => new Response(text, { status: code })) as unknown as typeof fetch;

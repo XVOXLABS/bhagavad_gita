@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
+import { KRISHNA_GREETING } from '@/lib/greeting';
 import { speakableText } from '@/lib/speech';
+import { avatarEngine } from './avatar/anam-engine';
+import { KrishnaAvatar, useAvatarState } from './avatar/krishna-avatar';
 import {
   CloseIcon,
   CompassIcon,
@@ -21,6 +24,7 @@ import {
 import { useSavedVerses, verseRef } from './saved';
 import { shareVerse } from './share-card';
 import { clearTalkDraft, readTalkDraft } from './talk-handoff';
+import { uid } from './uid';
 import { IconButton, VerseCard, type VerseActions } from './verse-card';
 import {
   micErrorMessage,
@@ -121,6 +125,11 @@ const UNAVAILABLE_TEXT = 'The reply could not be completed. Please try again.';
 const UNAVAILABLE_SPOKEN = 'Let us pause for a moment. Please try again in a little while.';
 const AUTOPLAY_KEY = 'gita.autoplay';
 const NATURAL_KEY = 'gita.naturalVoice';
+const AVATAR_KEY = 'gita.avatar';
+/** Longest wait for the face before a reply is spoken by voice alone. */
+const FACE_WAIT_MS = 6000;
+/** The small face card closes this long after Krishna stops speaking, to save session minutes. */
+const FACE_CARD_IDLE_MS = 20_000;
 const MIC_LANG_KEY = 'gita.micLang';
 const MIC_LANGS = [
   { code: 'en-IN', label: 'English (India)' },
@@ -183,7 +192,7 @@ function voiceSortKey(voice: SpeechSynthesisVoice): string {
 }
 
 export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse | null; withToday?: boolean }) {
-  const [sessionId] = useState(() => crypto.randomUUID());
+  const [sessionId] = useState(() => uid());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sharingRef, setSharingRef] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -229,12 +238,16 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
   const [formError, setFormError] = useState('');
   const [autoPlay, setAutoPlay] = useState(false);
   const [micLang, setMicLang] = useState('en-IN');
-  const [service, setService] = useState({ tts: false, stt: false });
+  const [service, setService] = useState({ tts: false, stt: false, avatar: false });
   const [naturalPref, setNaturalPref] = useState(true);
+  const [avatarPref, setAvatarPref] = useState(true);
+  const [faceCard, setFaceCard] = useState(false);
   const [sttDown, setSttDown] = useState(false);
 
   const naturalVoice = service.tts && naturalPref;
-  const voice = useKrishnaVoice(naturalVoice);
+  const avatarOn = naturalVoice && service.avatar && avatarPref;
+  const voice = useKrishnaVoice(naturalVoice, avatarOn);
+  const avatarState = useAvatarState();
   const recorder = useRecorder(micLang, service.stt && naturalPref && !sttDown);
   const browserDictation = useDictation(micLang);
   const dictation: Listener = recorder.supported
@@ -264,11 +277,14 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
   useEffect(() => {
     setAutoPlay(readPref(AUTOPLAY_KEY) === '1');
     setNaturalPref(readPref(NATURAL_KEY) !== '0');
+    setAvatarPref(readPref(AVATAR_KEY) !== '0');
     const saved = readPref(MIC_LANG_KEY);
     if (saved && MIC_LANGS.some((item) => item.code === saved)) setMicLang(saved);
     fetch('/api/voice')
-      .then((response) => (response.ok ? response.json() : { tts: false, stt: false }))
-      .then((data: { tts?: boolean; stt?: boolean }) => setService({ tts: Boolean(data.tts), stt: Boolean(data.stt) }))
+      .then((response) => (response.ok ? response.json() : { tts: false, stt: false, avatar: false }))
+      .then((data: { tts?: boolean; stt?: boolean; avatar?: boolean }) =>
+        setService({ tts: Boolean(data.tts), stt: Boolean(data.stt), avatar: Boolean(data.avatar) }),
+      )
       .catch(() => undefined);
   }, []);
 
@@ -323,11 +339,11 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
     setPending('send');
     clearTalkDraft();
     if (!fromTalk) setDraft('');
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: message }]);
+    setMessages((current) => [...current, { id: uid(), role: 'user', text: message }]);
     setStage('understanding');
 
     // The reply appears as one message that fills in while it streams, then is replaced by the final reply.
-    const id = crypto.randomUUID();
+    const id = uid();
     const withoutDraft = (current: UiMessage[]) => current.filter((item) => item.id !== id);
     const patchDraft = (change: (item: Extract<UiMessage, { role: 'assistant' }>) => Extract<UiMessage, { role: 'assistant' }>) =>
       setMessages((current) => {
@@ -374,7 +390,7 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
         const crisis = data?.crisis ?? null;
         setMessages((current) => [
           ...withoutDraft(current),
-          { id: crypto.randomUUID(), role: 'error', text: data?.error || data?.guidance || UNAVAILABLE_TEXT, crisis },
+          { id: uid(), role: 'error', text: data?.error || data?.guidance || UNAVAILABLE_TEXT, crisis },
         ]);
         return { speak: crisis ? `${crisis.message} ${UNAVAILABLE_SPOKEN}` : UNAVAILABLE_SPOKEN, pause: true };
       }
@@ -394,7 +410,7 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
     } catch {
       setMessages((current) => [
         ...withoutDraft(current),
-        { id: crypto.randomUUID(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null },
+        { id: uid(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null },
       ]);
       return { speak: UNAVAILABLE_SPOKEN, pause: true };
     } finally {
@@ -405,6 +421,57 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
   const talk = useTalkMode(voice, dictation, (text) => sendMessage(text, true));
   const talking = talk.state.mode !== 'off';
   const canTalk = voice.supported && dictation.supported;
+
+  /**
+   * Opens Krishna's face (once per session) and then speaks. If the face is not ready within
+   * a few seconds the reply is spoken by voice alone, and the face joins for the next one.
+   */
+  async function withFace(speakNow: () => void) {
+    if (!avatarOn) {
+      speakNow();
+      return;
+    }
+    if (!talking) setFaceCard(true);
+    await Promise.race([
+      avatarEngine().connect(),
+      new Promise((resolve) => window.setTimeout(resolve, FACE_WAIT_MS)),
+    ]);
+    speakNow();
+  }
+
+  function meetKrishna() {
+    voice.unlock();
+    void withFace(() => voice.speak('greeting', KRISHNA_GREETING, undefined, 'en', '/api/tts?greeting=1'));
+  }
+
+  function closeFaceCard() {
+    voice.stop();
+    setFaceCard(false);
+    avatarEngine().disconnect();
+  }
+
+  // Talk mode ends: close the live session so no minutes are spent in the background.
+  const wasTalking = useRef(false);
+  useEffect(() => {
+    if (wasTalking.current && !talking) {
+      setFaceCard(false);
+      avatarEngine().disconnect();
+    }
+    wasTalking.current = talking;
+  }, [talking]);
+
+  // The small face card leaves a short while after Krishna stops speaking.
+  useEffect(() => {
+    if (!faceCard || talking || voice.speakingId !== null || avatarState === 'connecting') return;
+    const timer = window.setTimeout(() => {
+      setFaceCard(false);
+      avatarEngine().disconnect();
+    }, FACE_CARD_IDLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [faceCard, talking, voice.speakingId, avatarState]);
+
+  // Leaving the Talk page ends any live session.
+  useEffect(() => () => avatarEngine().disconnect(), []);
 
   useEffect(() => {
     if (!talking) return;
@@ -464,6 +531,8 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
   function startTalk() {
     setSettingsOpen(false);
     voice.unlock();
+    // Connects while Krishna listens, so the face is ready by the time he answers.
+    if (avatarOn) void avatarEngine().connect();
     talk.begin();
   }
 
@@ -476,6 +545,15 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
     setNaturalPref(value);
     writePref(NATURAL_KEY, value ? '1' : '0');
     voice.stop();
+  }
+
+  function changeAvatar(value: boolean) {
+    setAvatarPref(value);
+    writePref(AVATAR_KEY, value ? '1' : '0');
+    if (!value) {
+      setFaceCard(false);
+      avatarEngine().disconnect();
+    }
   }
 
   function changeAutoPlay(value: boolean) {
@@ -525,6 +603,15 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
                 <input type="checkbox" className="switch" checked={naturalPref} onChange={(event) => changeNatural(event.target.checked)} />
               </label>
             ) : null}
+            {service.avatar && naturalVoice ? (
+              <label className="switch-row">
+                <span>
+                  <span className="switch-title">Show Krishna’s face</span>
+                  <span className="switch-sub">His lips move with his words when he speaks</span>
+                </span>
+                <input type="checkbox" className="switch" checked={avatarPref} onChange={(event) => changeAvatar(event.target.checked)} />
+              </label>
+            ) : null}
             {voice.supported ? (
               <label className="switch-row">
                 <span>
@@ -566,7 +653,9 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
             {sttDown ? <p className="sheet-note">Natural voice input is unavailable right now; your browser microphone is used instead.</p> : null}
             <p className="sheet-foot">
               {naturalVoice || recorder.supported
-                ? 'Your voice and Krishna’s replies are processed by ElevenLabs.'
+                ? avatarOn
+                  ? 'Your voice and Krishna’s replies are processed by ElevenLabs. Krishna’s video is rendered by Anam.'
+                  : 'Your voice and Krishna’s replies are processed by ElevenLabs.'
                 : 'Voices come from your device. In Chrome, speech is turned into text by Google.'}
             </p>
           </section>
@@ -596,11 +685,20 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
               <p className="hero-sub">
                 Say it in your own words. Krishna answers with a verse from the Bhagavad Gita.
               </p>
-              {canTalk ? (
-                <button type="button" className="btn btn-primary btn-lg" onClick={startTalk}>
-                  <MicIcon />
-                  Talk to Krishna
-                </button>
+              {canTalk || avatarOn ? (
+                <div className="hero-actions">
+                  {canTalk ? (
+                    <button type="button" className="btn btn-primary btn-lg" onClick={startTalk}>
+                      <MicIcon />
+                      Talk to Krishna
+                    </button>
+                  ) : null}
+                  {avatarOn ? (
+                    <button type="button" className="btn btn-secondary btn-lg" onClick={meetKrishna}>
+                      Meet Krishna
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </section>
 
@@ -683,17 +781,22 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
                           type="button"
                           className={`listen ${speaking ? 'is-playing' : ''}`}
                           aria-pressed={speaking}
-                          onClick={() =>
-                            speaking
-                              ? voice.stop()
-                              : voice.speak(
-                                  item.id,
-                                  speakableText(item.reply, item.crisis?.message, item.language),
-                                  undefined,
-                                  item.language,
-                                  ttsUrl(item.replyId),
-                                )
-                          }
+                          onClick={() => {
+                            if (speaking) {
+                              voice.stop();
+                              return;
+                            }
+                            voice.unlock();
+                            void withFace(() =>
+                              voice.speak(
+                                item.id,
+                                speakableText(item.reply, item.crisis?.message, item.language),
+                                undefined,
+                                item.language,
+                                ttsUrl(item.replyId),
+                              ),
+                            );
+                          }}
                         >
                           {speaking ? <StopIcon width={16} height={16} /> : <VolumeIcon width={16} height={16} />}
                           {speaking ? 'Stop' : 'Listen'}
@@ -747,6 +850,15 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
           </section>
         )}
       </main>
+
+      {faceCard && !talking ? (
+        <aside className="face-card" aria-label="Krishna speaking">
+          <KrishnaAvatar size="small" />
+          <IconButton label="Close Krishna’s face" onClick={closeFaceCard} className="icon-btn-sm face-card-close">
+            <CloseIcon />
+          </IconButton>
+        </aside>
+      ) : null}
 
       {notice ? (
         <p className="toast" role="status">
@@ -824,11 +936,22 @@ export function ChatScreen({ daily, withToday = false }: { daily: DisplayVerse |
             <CloseIcon />
           </IconButton>
           <div className="talk-center">
-            <div className="talk-orb" aria-hidden="true">
-              <span className="talk-ring" />
-              <span className="talk-ring talk-ring-2" />
-              <PeacockFeather className="talk-feather" />
-            </div>
+            {avatarOn ? (
+              <KrishnaAvatar size="large" label="Krishna is joining you…" />
+            ) : (
+              <div className="talk-orb" aria-hidden="true">
+                <span className="talk-ring" />
+                <span className="talk-ring talk-ring-2" />
+                <PeacockFeather className="talk-feather" />
+              </div>
+            )}
+            {avatarOn && (avatarState === 'ended' || avatarState === 'failed') ? (
+              <p className="talk-caption">
+                {avatarState === 'ended'
+                  ? 'Krishna’s video has paused. We will keep talking.'
+                  : 'Krishna’s video could not start. We will keep talking.'}
+              </p>
+            ) : null}
             <p className="talk-status" aria-live="polite">
               {talk.state.mode === 'listening' && dictation.transcribing ? 'Understanding your words' : TALK_LABELS[talk.state.mode]}
             </p>
