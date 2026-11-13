@@ -72,9 +72,9 @@ let cached: Corpus | null = null;
 export function loadCorpus(): Corpus {
   if (cached) return cached;
 
-  const raw = readFileSync(verseJsonPath());
-  const sha256 = createHash('sha256').update(raw).digest('hex');
-  const records = JSON.parse(raw.toString('utf8')) as SourceRecord[];
+  const text = readFileSync(verseJsonPath(), 'utf8').replace(/\r\n/g, '\n');
+  const sha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+  const records = JSON.parse(text) as SourceRecord[];
   const verses = new Map<string, CorpusVerse>();
   const chapters = new Set<number>();
   let duplicateKeys = 0;

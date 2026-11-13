@@ -7,25 +7,26 @@ import { KrishnaMark } from './icons';
 import { useSavedVerses } from './saved';
 
 const PLACES = [
-  { href: '/', label: 'Today', match: (path: string) => path === '/' },
-  { href: '/talk', label: 'Talk', match: (path: string) => path.startsWith('/talk') },
-  { href: '/gita', label: 'Read', match: (path: string) => path.startsWith('/gita') },
+  { href: '/', label: 'Speak with Krishna', match: (path: string) => path === '/' || path.startsWith('/talk') },
+  { href: '/today', label: 'Today’s Verse', match: (path: string) => path.startsWith('/today') },
+  { href: '/gita', label: 'Read Gita', match: (path: string) => path.startsWith('/gita') },
   { href: '/my-gita', label: 'My Gita', match: (path: string) => path.startsWith('/my-gita') },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { saved } = useSavedVerses();
+  const isCompanion = pathname === '/' || pathname.startsWith('/talk');
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <div className={`app ${isCompanion ? 'app-companion-view' : ''}`}>
+      <header className={`topbar ${isCompanion ? 'topbar-companion' : ''}`}>
         <div className="topbar-inner">
-          <Link href="/" className="brand" aria-label="Speak with Krishna, today">
+          <Link href="/" className="brand" aria-label="Speak with Krishna">
             <KrishnaMark className="brand-mark" />
             <span className="brand-text">
               <span className="brand-name">Speak with Krishna</span>
-              <span className="brand-tag">Guidance from the Bhagavad Gita</span>
+              <span className="brand-tag">Divine Companion</span>
             </span>
           </Link>
           <nav className="place-nav" aria-label="Places">

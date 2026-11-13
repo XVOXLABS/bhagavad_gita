@@ -21,7 +21,7 @@ const LIVE: AvatarState[] = ['ready', 'speaking'];
  * Krishna's face. The still portrait is always underneath; the live video fades in over it
  * once the session is ready, and fades away again if it ends or fails.
  */
-export function KrishnaAvatar({ size = 'large', label }: { size?: 'large' | 'small'; label?: string }) {
+export function KrishnaAvatar({ size = 'fullscreen', label }: { size?: 'large' | 'small' | 'fullscreen'; label?: string }) {
   const stage = useRef<HTMLDivElement>(null);
   const state = useAvatarState();
 
@@ -33,15 +33,17 @@ export function KrishnaAvatar({ size = 'large', label }: { size?: 'large' | 'sma
     return () => engine.release(container);
   }, []);
 
+  const portraitSrc = size === 'fullscreen' ? '/krishna/portrait-1200.webp' : '/krishna/avatar-512.webp';
+
   return (
     <div className={`krishna-face krishna-face-${size}`} data-state={state} data-live={LIVE.includes(state) || undefined}>
       <div className="krishna-face-frame">
-        <img className="krishna-face-portrait" src="/krishna/avatar-512.webp" alt="" aria-hidden="true" />
+        <img className="krishna-face-portrait" src={portraitSrc} alt="Krishna" aria-hidden="true" />
         <div ref={stage} className="krishna-face-stage" />
       </div>
       {state === 'connecting' ? (
         <p className="krishna-face-note" role="status">
-          {label ?? 'Krishna is coming…'}
+          {label ?? 'Krishna is arriving…'}
         </p>
       ) : null}
     </div>

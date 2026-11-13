@@ -49,6 +49,7 @@ class AnamEngine {
       video.id = VIDEO_ID;
       video.autoplay = true;
       video.playsInline = true;
+      video.muted = true;
       video.className = 'krishna-face-video';
       this.holder.appendChild(video);
       this.video = video;
@@ -58,6 +59,7 @@ class AnamEngine {
 
   adopt(container: HTMLElement) {
     const video = this.videoElement();
+    video.muted = true;
     if (video.parentElement !== container) container.appendChild(video);
     void video.play().catch(() => undefined);
   }
@@ -120,6 +122,12 @@ class AnamEngine {
     return this.connecting;
   }
 
+  unmute() {
+    if (this.video) {
+      this.video.muted = false;
+    }
+  }
+
   /**
    * Streams one reply's raw audio into the face. Resolves false when the face could not take it,
    * so the caller can use the voice-only path instead.
@@ -127,6 +135,7 @@ class AnamEngine {
   async speak(url: string, handlers: AvatarSpeakHandlers): Promise<boolean> {
     if (this.state !== 'ready' || !this.input) return false;
     this.cancelSpeech();
+    this.unmute();
     const abort = new AbortController();
     this.abort = abort;
     let response: Response;
