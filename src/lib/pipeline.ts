@@ -1,8 +1,10 @@
+import { newMemories, NO_PERSON, type Person } from './companion';
 import { lookup, toDisplay, type DisplayVerse } from './corpus';
 import { embedQuery } from './embed';
 import { extractSituation, safeErrorMessage, selectVerses, writeConversation, writeReply } from './llm';
 import {
   FALLBACK_CONVERSE,
+  FALLBACK_LISTEN,
   FIXED_LEAD_IN,
   RESTATE_NOTE,
   RETRY_BAD_CITATIONS,
@@ -38,6 +40,10 @@ export type ChatResult = {
   crisis: boolean;
   language: string;
   calls: number;
+  /** True when Krishna asked the person to say more instead of giving a verse. */
+  listened: boolean;
+  /** New things worth remembering from this message; the app decides where they are kept. */
+  remember: string[];
   debug: {
     situation: Situation;
     shortlist: string[];
@@ -79,16 +85,22 @@ function streamer(emit: Emit | undefined, keys: typeof REPLY_KEYS, language: str
  * Runs the whole reply. With `emit`, progress, the chosen verse and the reply's verified sentences are
  * reported as they happen; the returned result is still the final, authoritative reply.
  */
-export async function respond(message: string, history: SessionMessage[], emit?: Emit): Promise<ChatResult> {
+export async function respond(
+  message: string,
+  history: SessionMessage[],
+  emit?: Emit,
+  person: Person = NO_PERSON,
+): Promise<ChatResult> {
   let calls = 0;
   const priorRefs = [...new Set(history.flatMap((turn) => turn.citations ?? []))];
-  const previousLanguage = lastLanguage(history);
+  // A new conversation starts in the language Krishna last spoke to this person in.
+  const previousLanguage = lastLanguage(history) ?? (person.profile.language || undefined);
 
   emit?.({ type: 'stage', stage: 'understanding' });
   let situation: Situation;
   try {
     calls += 1;
-    situation = parseSituation(await extractSituation(message, history), message, previousLanguage);
+    situation = parseSituation(await extractSituation(message, history, previousLanguage), message, previousLanguage);
   } catch (error) {
     console.info(JSON.stringify({ event: 'situation_failed', detail: safeErrorMessage(error) }));
     situation = fallbackSituation(message, previousLanguage);
@@ -97,25 +109,32 @@ export async function respond(message: string, history: SessionMessage[], emit?:
   if (crisis) situation = { ...situation, intent: 'problem', crisis: true };
   const language = situation.replyLanguage;
   const debug: ChatResult['debug'] = { situation, shortlist: [], mode: 'none', reason: '', dropped: [] };
-  console.info(JSON.stringify({ event: 'intent', intent: situation.intent, language, crisis }));
+  const remember = crisis ? [] : newMemories(situation.remember, message, person.memory);
+  // A friend listens first: when they have only begun to share, Krishna asks once before offering a verse.
+  const askedLast = history[history.length - 1]?.asked === true;
+  const listen = situation.intent === 'problem' && !crisis && !situation.clear && !askedLast;
+  console.info(JSON.stringify({ event: 'intent', intent: situation.intent, language, crisis, listen, remembered: remember.length }));
 
   // A language switch re-expresses the last guidance; it is not a new situation.
   const restate =
     situation.intent === 'language_request' && lastCitations(history).length > 0 && previousLanguage !== language;
 
-  if (!needsVerse(situation.intent) && !restate) {
+  if ((!needsVerse(situation.intent) || listen) && !restate) {
     emit?.({ type: 'stage', stage: 'writing' });
     const live = streamer(emit, CONVERSE_KEYS, language);
+    const fallback = listen ? FALLBACK_LISTEN : FALLBACK_CONVERSE;
     let text: string | null = null;
     try {
       calls += 1;
-      text = parseConversation(await writeConversation(message, history, situation, live?.onText));
+      text = parseConversation(
+        await writeConversation(message, history, situation, listen ? 'listen' : situation.intent, person, live?.onText),
+      );
     } catch (error) {
       console.info(JSON.stringify({ event: 'converse_failed', detail: safeErrorMessage(error) }));
     }
     if (!text || live?.gate.leaked || guidanceLeaks(text, language)) {
       if (live?.gate.emitted) emit?.({ type: 'reset' });
-      text = FALLBACK_CONVERSE;
+      text = fallback;
     }
     text = tidyOpener(text);
     return {
@@ -123,8 +142,10 @@ export async function respond(message: string, history: SessionMessage[], emit?:
       reply: { acknowledge: text, connection: '', step: '' },
       verses: [],
       crisis: false,
-      language: text === FALLBACK_CONVERSE ? 'en' : language,
+      language: text === fallback ? 'en' : language,
       calls,
+      listened: listen,
+      remember,
       debug,
     };
   }
@@ -175,7 +196,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
       }
     } catch (error) {
       console.info(JSON.stringify({ event: 'select_failed', detail: safeErrorMessage(error) }));
-      return { status: 'unavailable', reply: EMPTY_REPLY, verses: [], crisis, language, calls, debug };
+      return { status: 'unavailable', reply: EMPTY_REPLY, verses: [], crisis, language, calls, listened: false, remember: [], debug };
     }
     verses = chosen?.result.status === 'answered' ? chosen.result.verses : [];
     debug.reason = chosen?.reason ?? '';
@@ -188,18 +209,21 @@ export async function respond(message: string, history: SessionMessage[], emit?:
   emit?.({ type: 'verses', verses, crisis });
   emit?.({ type: 'stage', stage: 'writing' });
   // With no verse the connection is dropped below, so it is never streamed either.
-  const keys = verses.length > 0 ? REPLY_KEYS : REPLY_KEYS.filter((entry) => entry.field !== 'connection');
+  // A crisis reply ends on the helplines, so its question is never streamed either.
+  const keys = REPLY_KEYS.filter(
+    (entry) => (verses.length > 0 || entry.field !== 'connection') && (!crisis || entry.field !== 'question'),
+  );
   const live = streamer(emit, keys, language, sanskrit);
 
   let reply: Reply | null = null;
   try {
     calls += 1;
-    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote, live?.onText));
+    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote, live?.onText, person));
     if (!reply || live?.gate.leaked || replyLeaks(reply, language, sanskrit)) {
       if (live?.gate.emitted) emit?.({ type: 'reset' });
       calls += 1;
       const note = [baseNote, reply ? RETRY_GUIDANCE_LEAK : RETRY_NOT_JSON].filter(Boolean).join('\n\n');
-      reply = parseReply(await writeReply(message, history, situation, verses, crisis, note));
+      reply = parseReply(await writeReply(message, history, situation, verses, crisis, note, undefined, person));
     }
   } catch (error) {
     console.info(JSON.stringify({ event: 'write_failed', detail: safeErrorMessage(error) }));
@@ -211,7 +235,9 @@ export async function respond(message: string, history: SessionMessage[], emit?:
     replyLanguage = 'en';
   }
   if (verses.length === 0) reply = { ...reply, connection: '' };
+  // In a crisis the helplines are the last word, not a question.
+  if (crisis) reply = { ...reply, question: '' };
   reply = { ...reply, acknowledge: tidyOpener(reply.acknowledge) };
 
-  return { status, reply, verses, crisis, language: replyLanguage, calls, debug };
+  return { status, reply, verses, crisis, language: replyLanguage, calls, listened: false, remember, debug };
 }

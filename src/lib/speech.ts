@@ -1,4 +1,4 @@
-export type SpeakableReply = { acknowledge: string; connection: string; step: string };
+export type SpeakableReply = { acknowledge: string; connection: string; step: string; question?: string };
 
 export type VoiceLike = { name: string; lang: string; default?: boolean };
 
@@ -29,6 +29,8 @@ export function speakableText(reply: SpeakableReply, lead?: string, language = '
   const parts = [lead ? sentence(lead, 'en') : '', sentence(reply.acknowledge, language), sentence(reply.connection, language)];
   const step = sentence(reply.step, language);
   if (step) parts.push(language === 'en' ? `One step for today. ${step}` : step);
+  // His question comes last, so it is what the person is left with.
+  if (reply.question) parts.push(sentence(reply.question, language));
   return parts.filter(Boolean).join(' ');
 }
 

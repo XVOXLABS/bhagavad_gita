@@ -68,3 +68,12 @@ test('SentenceGate trims the stock opener from the first sentence', () => {
     { field: 'acknowledge', text: 'This has been a long, heavy week.' },
   ]);
 });
+
+test('the closing question streams as its own field', () => {
+  const gate = new SentenceGate(REPLY_KEYS, 'en');
+  const out = gate.push('{"acknowledge":"That is heavy.","connection":"","step":"","question":"What happened today?"}');
+  assert.deepEqual(out, [
+    { field: 'acknowledge', text: 'That is heavy.' },
+    { field: 'question', text: 'What happened today?' },
+  ]);
+});

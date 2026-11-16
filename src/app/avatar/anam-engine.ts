@@ -230,7 +230,12 @@ class AnamEngine {
 let engine: AnamEngine | null = null;
 
 export function avatarEngine(): AnamEngine {
-  engine ??= new AnamEngine();
+  if (!engine) {
+    const created = new AnamEngine();
+    engine = created;
+    // Closing or reloading the tab ends the session, so it does not hold the plan's one live slot.
+    window.addEventListener('pagehide', () => created.disconnect());
+  }
   return engine;
 }
 

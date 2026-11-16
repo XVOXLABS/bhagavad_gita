@@ -6,6 +6,7 @@ import { isThemeId, themesFromText } from './themes';
 const INTENTS = new Set<Intent>([
   'problem',
   'follow_up',
+  'sharing',
   'greeting',
   'about_me',
   'language_request',
@@ -39,6 +40,8 @@ export type Reply = {
   acknowledge: string;
   connection: string;
   step: string;
+  /** One question that keeps the conversation going; absent when the reply should simply rest. */
+  question?: string;
 };
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -98,6 +101,8 @@ export function fallbackSituation(message: string, previousLanguage?: string): S
     themes: themesFromText(message),
     crisis: false,
     continuesPrevious: false,
+    clear: true,
+    remember: [],
   };
 }
 
@@ -120,6 +125,10 @@ export function parseSituation(raw: string, message: string, previousLanguage?: 
     themes: verse ? (themes.length > 0 ? themes : themesFromText(message)) : [],
     crisis,
     continuesPrevious: data.continuesPrevious === true,
+    // Only an explicit "false" makes Krishna ask first; a missing field keeps the verse.
+    clear: data.clear !== false,
+    // Nothing said in a crisis is kept for later.
+    remember: crisis || !Array.isArray(data.remember) ? [] : data.remember.map((item) => text(item, 160)).filter(Boolean).slice(0, 3),
   };
 }
 
@@ -179,13 +188,14 @@ export function parseReply(raw: string): Reply | null {
     acknowledge: text(data.acknowledge),
     connection: text(data.connection, 900),
     step: text(data.step),
+    question: text(data.question, 300),
   };
   if (!reply.acknowledge && !reply.connection) return null;
   return reply;
 }
 
 export function replyLeaks(reply: Reply, language = 'en', sanskrit: string[] = []): boolean {
-  return [reply.acknowledge, reply.connection, reply.step].some((part) => guidanceLeaks(part, language, sanskrit));
+  return [reply.acknowledge, reply.connection, reply.step, reply.question ?? ''].some((part) => guidanceLeaks(part, language, sanskrit));
 }
 
 const STOCK_OPENER =
@@ -201,7 +211,7 @@ export function tidyOpener(text: string): string {
 }
 
 export function replyText(reply: Reply): string {
-  return [reply.acknowledge, reply.connection, reply.step].filter(Boolean).join('\n\n');
+  return [reply.acknowledge, reply.connection, reply.step, reply.question].filter(Boolean).join('\n\n');
 }
 
 const FOLLOW_UP =

@@ -7,12 +7,13 @@ import type { DisplayVerse } from '@/lib/corpus';
 import { Lotus, PeacockFeather } from './icons';
 import { useSavedVerses, verseRef } from './saved';
 import { shareVerse } from './share-card';
-import { stageTalkDraft } from './talk-handoff';
+import { useConversation } from './stage/conversation';
 import { useKrishnaVoice } from './use-speech';
 import { VerseCard, verseToSpeak, type VerseActions } from './verse-card';
 
 export function TodayScreen({ daily }: { daily: DisplayVerse | null }) {
   const router = useRouter();
+  const conversation = useConversation();
   const savedVerses = useSavedVerses();
   const voice = useKrishnaVoice(false);
   const [heavy, setHeavy] = useState('');
@@ -55,8 +56,10 @@ export function TodayScreen({ daily }: { daily: DisplayVerse | null }) {
 
   function openTalk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    stageTalkDraft(heavy);
-    router.push('/talk?today=1');
+    conversation.markEntered();
+    if (heavy.trim()) void conversation.sendMessage(heavy);
+    else conversation.setFlow({ at: 'ask', prompt: 'open' });
+    router.push('/');
   }
 
   return (

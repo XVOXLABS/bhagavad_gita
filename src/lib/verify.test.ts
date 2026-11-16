@@ -164,3 +164,27 @@ test('stock openers are trimmed but real sentences are kept', () => {
   assert.equal(tidyOpener('I see.'), 'I see.');
   assert.equal(tidyOpener('Losing a parent changes everything.'), 'Losing a parent changes everything.');
 });
+
+test('a reply may end with a question, and it is checked like the rest', () => {
+  const reply = parseReply(JSON.stringify({ acknowledge: 'That is a lot to hold.', connection: '', step: '', question: 'What happened today?' }));
+  assert.ok(reply);
+  assert.equal(reply.question, 'What happened today?');
+  assert.equal(replyText(reply), ['That is a lot to hold.', 'What happened today?'].join(String.fromCharCode(10, 10)));
+  assert.equal(replyLeaks({ acknowledge: 'Ok.', connection: '', step: '', question: 'Have you read 2.47?' }), true);
+  assert.equal(parseReply(JSON.stringify({ acknowledge: 'Ok.' }))?.question, '');
+});
+
+test('the situation says when to listen first and what to remember', () => {
+  const thin = parseSituation(JSON.stringify({ intent: 'problem', clear: false, remember: ['Has an exam on Friday', 7, ''] }), 'I feel low, exam on friday');
+  assert.equal(thin.clear, false);
+  assert.deepEqual(thin.remember, ['Has an exam on Friday']);
+  // A missing field keeps the old behaviour: answer with a verse, remember nothing.
+  const plain = parseSituation(JSON.stringify({ intent: 'problem' }), 'my father died last week');
+  assert.equal(plain.clear, true);
+  assert.deepEqual(plain.remember, []);
+  // Nothing said in a crisis is kept.
+  assert.deepEqual(parseSituation(JSON.stringify({ crisis: true, remember: ['Wants to die'] }), 'x').remember, []);
+  assert.equal(parseSituation(JSON.stringify({ intent: 'sharing' }), 'I got the job!').intent, 'sharing');
+  assert.equal(needsVerse('sharing'), false);
+  assert.equal(parseSituation('garbage', 'hello').clear, true);
+});

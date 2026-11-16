@@ -1,18 +1,18 @@
 /*
- * Design tokens: "Night temple".
+ * Design tokens: "GitaLens dusk".
  * Layer 1 primitives (raw values) -> layer 2 semantic (purpose) -> layer 3 component.
  * Components use semantic or component tokens only, never primitives or raw hex.
  */
 
 :root {
   /* ---------- 1. Primitives ---------- */
-  --indigo-950: #060a1c;
-  --indigo-900: #0a1029;
-  --indigo-850: #0e1636;
-  --indigo-800: #131d45;
-  --indigo-700: #1b2857;
-  --indigo-600: #27376f;
-  --indigo-500: #3a4c8f;
+  --dusk-950: #120c16;
+  --dusk-900: #1a1220;
+  --dusk-850: #21172a;
+  --dusk-800: #2a1d35;
+  --dusk-700: #372746;
+  --dusk-600: #4a3560;
+  --dusk-500: #64488a;
 
   --gold-100: #fbf0d2;
   --gold-200: #f5e1ad;
@@ -23,9 +23,19 @@
 
   --cream-50: #fcf8ef;
   --cream-100: #f1e9d8;
-  --mist-300: #c3c8e2;
-  --mist-400: #9ba2c6;
-  --mist-500: #757ca3;
+  --mist-300: #ddd5e6;
+  --mist-400: #bdb1cc;
+  --mist-500: #aa9fba;
+
+  --violet-400: #a78bfa;
+  --violet-500: #7c5cf0;
+  --violet-600: #5b3fd0;
+  --violet-border: rgba(167, 139, 250, 0.6);
+  --violet-soft: rgba(167, 139, 250, 0.16);
+
+  --parchment-light: #f3c98a;
+  --parchment-deep: #d9964b;
+  --parchment-ink: #3a1c0c;
 
   --peacock-400: #4fc1bb;
   --peacock-600: #237d7a;
@@ -80,12 +90,12 @@
   --radius-full: 999px;
 
   /* ---------- 2. Semantic ---------- */
-  --bg-app: var(--indigo-950);
-  --bg-glow: rgba(58, 76, 143, 0.55);
-  --surface-1: var(--indigo-900);
-  --surface-2: var(--indigo-850);
-  --surface-3: var(--indigo-800);
-  --surface-glass: rgba(10, 16, 41, 0.72);
+  --bg-app: var(--dusk-950);
+  --bg-glow: rgba(100, 72, 138, 0.4);
+  --surface-1: var(--dusk-900);
+  --surface-2: var(--dusk-850);
+  --surface-3: var(--dusk-800);
+  --surface-glass: rgba(18, 12, 22, 0.8);
   --surface-hover: var(--white-a06);
 
   --text-primary: var(--cream-100);
@@ -104,7 +114,7 @@
   --accent-hover: var(--gold-300);
   --accent-soft: var(--gold-a10);
   --accent-softer: var(--gold-a16);
-  --on-accent: var(--indigo-950);
+  --on-accent: var(--dusk-950);
 
   --success: var(--leaf-400);
   --danger: var(--rose-300);
@@ -130,12 +140,12 @@
   --button-ghost-bg-hover: var(--surface-hover);
   --icon-button-size: 40px;
 
-  --card-bg: linear-gradient(180deg, rgba(27, 40, 87, 0.55), rgba(14, 22, 54, 0.75));
+  --card-bg: linear-gradient(180deg, rgba(55, 39, 70, 0.72), rgba(33, 23, 42, 0.88));
   --card-border: var(--border-accent);
   --card-radius: var(--radius-20);
   --card-padding: var(--space-6);
 
-  --bubble-user-bg: var(--indigo-700);
+  --bubble-user-bg: var(--dusk-700);
   --bubble-user-border: var(--border-default);
   --bubble-user-fg: var(--text-strong);
 
@@ -145,7 +155,7 @@
 
   --avatar-size: 36px;
 
-  --practice-bg: linear-gradient(135deg, var(--peacock-a08), rgba(58, 76, 143, 0.25));
+  --practice-bg: linear-gradient(135deg, var(--peacock-a08), rgba(100, 72, 138, 0.25));
   --practice-border: var(--peacock-a30);
   --practice-accent: var(--peacock-400);
   --tile-bg: var(--surface-3);

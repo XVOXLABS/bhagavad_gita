@@ -14,7 +14,7 @@ function fixtureVectors(target: string): VerseVectors {
 }
 
 function situation(themes: Situation['themes']): Situation {
-  return { intent: 'problem', replyLanguage: 'en', emotions: [], situation: '', need: '', themes, crisis: false, continuesPrevious: false };
+  return { intent: 'problem', replyLanguage: 'en', emotions: [], situation: '', need: '', themes, crisis: false, continuesPrevious: false, clear: true, remember: [] };
 }
 
 test('expands everyday words into gloss terms', () => {

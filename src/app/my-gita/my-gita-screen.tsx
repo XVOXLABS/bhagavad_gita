@@ -63,7 +63,7 @@ export function MyGitaScreen() {
             <h2>No verses saved yet</h2>
             <p>Tap the bookmark on any verse that speaks to you, and it will wait for you here.</p>
             <div className="empty-actions">
-              <Link href="/" className="btn btn-primary">
+              <Link href="/today" className="btn btn-primary">
                 Today’s verse
               </Link>
               <Link href="/gita" className="btn btn-secondary">

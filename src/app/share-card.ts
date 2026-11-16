@@ -112,7 +112,7 @@ export async function renderShareCard(verse: DisplayVerse): Promise<Blob> {
 
   ctx.fillStyle = GOLD;
   ctx.font = `30px ${serif}`;
-  ctx.fillText('Speak with Krishna', W / 2, H - 120);
+  ctx.fillText('GitaLens · Speak with Krishna', W / 2, H - 120);
   ctx.fillStyle = 'rgba(251, 243, 228, 0.7)';
   ctx.font = `26px ${serif}`;
   ctx.fillText(window.location.host, W / 2, H - 80);

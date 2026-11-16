@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { parsePerson, type Person } from '@/lib/companion';
 import { safeErrorMessage } from '@/lib/llm';
 import { speakableText } from '@/lib/speech';
 import { respond, type ChatResult } from '@/lib/pipeline';
@@ -19,6 +20,9 @@ type ChatBody = {
   message?: unknown;
   reset?: unknown;
   stream?: unknown;
+  /** Who the person is and what they told Krishna before, kept on their device. */
+  profile?: unknown;
+  memory?: unknown;
 };
 
 function json(body: unknown, status = 200): Response {
@@ -57,6 +61,7 @@ function finish(sessionId: string, message: string, result: ChatResult) {
       language: result.language,
       replyId,
       speech: speakableText(result.reply, result.crisis ? CRISIS_MESSAGE : undefined, result.language),
+      asked: result.listened,
     },
   ]);
 
@@ -68,6 +73,8 @@ function finish(sessionId: string, message: string, result: ChatResult) {
     verses: result.verses,
     language: result.language,
     crisis: crisisBlock(result.crisis),
+    // New notes for the person's device to keep; the server stores none of them.
+    remember: result.remember,
     usage: { calls: result.calls },
   };
 }
@@ -78,7 +85,7 @@ function failed(message: string, error: unknown) {
 }
 
 /** One JSON event per line: stage, verses, delta, reset, then a final "done" carrying the full reply. */
-function streamReply(request: Request, sessionId: string, message: string): Response {
+function streamReply(request: Request, sessionId: string, message: string, person: Person): Response {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -97,7 +104,7 @@ function streamReply(request: Request, sessionId: string, message: string): Resp
       let done;
       try {
         // The turn is saved even if the reader has gone, so the session history stays complete.
-        done = finish(sessionId, message, await respond(message, getSession(sessionId), emit));
+        done = finish(sessionId, message, await respond(message, getSession(sessionId), emit, person));
       } catch (error) {
         done = failed(message, error);
       }
@@ -146,10 +153,11 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: 'Message is too long.' }, 400);
   }
 
-  if (body.stream === true) return streamReply(request, sessionId, message);
+  const person = parsePerson(body.profile, body.memory);
+  if (body.stream === true) return streamReply(request, sessionId, message, person);
 
   try {
-    return json(finish(sessionId, message, await respond(message, getSession(sessionId))));
+    return json(finish(sessionId, message, await respond(message, getSession(sessionId), undefined, person)));
   } catch (error) {
     return json(failed(message, error));
   }

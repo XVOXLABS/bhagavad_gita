@@ -37,6 +37,7 @@ const QUERY_GROUPS: string[][] = [
 export type Intent =
   | 'problem'
   | 'follow_up'
+  | 'sharing'
   | 'greeting'
   | 'about_me'
   | 'language_request'
@@ -55,6 +56,10 @@ export type Situation = {
   crisis: boolean;
   /** True when this message continues the previous topic rather than raising a new one. */
   continuesPrevious: boolean;
+  /** False when they have only begun to share, so Krishna asks before he offers a verse. */
+  clear: boolean;
+  /** Lasting things the person said about their life, worth recalling in a later conversation. */
+  remember: string[];
 };
 
 export type ShortlistInput = {

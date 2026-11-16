@@ -7,6 +7,8 @@ export type SessionMessage = {
   /** Lets the voice route speak exactly this reply and nothing else. */
   replyId?: string;
   speech?: string;
+  /** True when this reply asked the person to say more instead of giving a verse. */
+  asked?: boolean;
 };
 
 export function findReply(sessionId: string, replyId: string): { speech: string; language: string } | null {
@@ -22,7 +24,8 @@ export function lastCitations(history: SessionMessage[]): string[] {
   return [...history].reverse().find((turn) => turn.role === 'assistant' && turn.citations?.length)?.citations ?? [];
 }
 
-const MAX_MESSAGES = 8;
+/** Twelve exchanges. What matters beyond that is carried by the person's remembered notes. */
+const MAX_MESSAGES = 24;
 
 const globalStore = globalThis as unknown as { __gitaSessions?: Map<string, SessionMessage[]> };
 const sessions = globalStore.__gitaSessions ?? new Map<string, SessionMessage[]>();

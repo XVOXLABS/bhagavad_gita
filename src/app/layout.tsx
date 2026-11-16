@@ -1,11 +1,12 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { Fraunces, Inter, Noto_Serif_Devanagari } from 'next/font/google';
+import { Inter, Noto_Serif_Devanagari, Source_Serif_4 } from 'next/font/google';
 import { AppShell } from './app-shell';
 import './tokens.css';
 import './globals.css';
+import './stage/stage.css';
 
-const fraunces = Fraunces({
+const serif = Source_Serif_4({
   subsets: ['latin'],
   variable: '--font-serif',
   display: 'swap',
@@ -25,18 +26,19 @@ const devanagari = Noto_Serif_Devanagari({
 });
 
 export const metadata: Metadata = {
-  title: 'Speak with Krishna · Bhagavad Gita guidance',
-  description: 'A verse for this day, and guidance from the Bhagavad Gita when something is heavy.',
+  title: 'GitaLens · Speak with Krishna',
+  description: 'Tell Krishna what is in your heart, and receive guidance from a real verse of the Bhagavad Gita.',
 };
 
 export const viewport: Viewport = {
-  themeColor: '#060a1c',
+  themeColor: '#120c16',
   colorScheme: 'dark',
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${inter.variable} ${devanagari.variable}`}>
+    <html lang="en" className={`${serif.variable} ${inter.variable} ${devanagari.variable}`}>
       <body>
         <AppShell>{children}</AppShell>
       </body>

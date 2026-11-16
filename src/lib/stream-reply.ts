@@ -1,7 +1,7 @@
 import type { DisplayVerse } from './corpus';
 import { guidanceLeaks, tidyOpener } from './verify';
 
-export type ReplyField = 'acknowledge' | 'connection' | 'step';
+export type ReplyField = 'acknowledge' | 'connection' | 'step' | 'question';
 export type Stage = 'understanding' | 'searching' | 'choosing' | 'writing';
 
 /** What the pipeline reports while it works; the chat route turns these into NDJSON lines. */
@@ -123,6 +123,7 @@ export const REPLY_KEYS: { key: string; field: ReplyField }[] = [
   { key: 'acknowledge', field: 'acknowledge' },
   { key: 'connection', field: 'connection' },
   { key: 'step', field: 'step' },
+  { key: 'question', field: 'question' },
 ];
 
 /** Conversational replies are one "reply" field, shown where the acknowledgement goes. */

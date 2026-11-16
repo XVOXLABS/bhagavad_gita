@@ -125,3 +125,8 @@ test('voice activity: stops after a pause that follows speech, or when nothing i
   manual = nextVadState(manual, 0.001, VAD.maxMs, false);
   assert.equal(manual.reason, 'max');
 });
+
+test('a closing question is spoken last', () => {
+  const text = speakableText({ acknowledge: 'That is heavy.', connection: '', step: 'Sit for a minute', question: 'What happened' });
+  assert.equal(text, 'That is heavy. One step for today. Sit for a minute. What happened.');
+});
