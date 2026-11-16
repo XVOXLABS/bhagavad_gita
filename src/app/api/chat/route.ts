@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { safeErrorMessage } from '@/lib/llm';
+import { type DisplayVerse } from '@/lib/corpus';
+import { extractMemories, safeErrorMessage } from '@/lib/llm';
+import { type CompanionMemory, type MemoryCategory, MEMORY_CATEGORIES } from '@/lib/memory';
+import { type DevoteeProfile } from '@/lib/profile';
 import { speakableText } from '@/lib/speech';
 import { respond, type ChatResult } from '@/lib/pipeline';
 import { CRISIS_MESSAGE, HELPLINES, mentionsCrisis } from '@/lib/safety';
 import { appendSession, clearSession, getSession } from '@/lib/session';
 import type { PipelineEvent } from '@/lib/stream-reply';
-import { replyText } from '@/lib/verify';
+import { replyText, type Reply } from '@/lib/verify';
 
 export const runtime = 'nodejs';
 // Up to five model calls plus an embedding; the default serverless limit can be too short.
@@ -14,12 +17,61 @@ export const maxDuration = 60;
 const MAX_MESSAGE_LENGTH = 2000;
 const UNAVAILABLE_GUIDANCE = 'The reply could not be completed. Please try again.';
 
+export type FinishedTurn = {
+  status: ChatResult['status'];
+  guidance: string;
+  reply?: Reply;
+  replyId?: string;
+  verses: DisplayVerse[];
+  language?: string;
+  crisis: { message: string; helplines: typeof HELPLINES } | null;
+  usage: { calls: number };
+  newMemories?: { fact: string; category: MemoryCategory; associatedVerse?: string }[];
+};
+
 type ChatBody = {
   sessionId?: unknown;
   message?: unknown;
   reset?: unknown;
   stream?: unknown;
+  profile?: unknown;
+  memories?: unknown;
 };
+
+function parseMemories(raw: unknown): CompanionMemory[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((obj) => {
+      const cat =
+        typeof obj.category === 'string' && obj.category in MEMORY_CATEGORIES
+          ? (obj.category as MemoryCategory)
+          : 'struggle';
+      return {
+        id: typeof obj.id === 'string' ? obj.id : String(Date.now()),
+        fact: String(obj.fact || '').slice(0, 200).trim(),
+        category: cat,
+        createdAt: typeof obj.createdAt === 'number' ? obj.createdAt : Date.now(),
+        associatedVerse: typeof obj.associatedVerse === 'string' ? obj.associatedVerse : undefined,
+        active: obj.active !== false,
+      };
+    })
+    .filter((m) => m.fact.length >= 3)
+    .slice(0, 30);
+}
+
+function parseProfile(raw: unknown): DevoteeProfile | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const data = raw as Record<string, unknown>;
+  const persona =
+    data.persona === 'guru' || data.persona === 'margadarshi' ? data.persona : 'sakha';
+  return {
+    preferredName: typeof data.preferredName === 'string' ? data.preferredName.slice(0, 50).trim() : undefined,
+    persona,
+    language: typeof data.language === 'string' ? data.language.slice(0, 10).trim() : undefined,
+    lifeContext: typeof data.lifeContext === 'string' ? data.lifeContext.slice(0, 200).trim() : undefined,
+  };
+}
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status });
@@ -29,7 +81,7 @@ function crisisBlock(crisis: boolean) {
   return crisis ? { message: CRISIS_MESSAGE, helplines: HELPLINES } : null;
 }
 
-function unavailable(crisis: boolean, calls: number) {
+function unavailable(crisis: boolean, calls: number): FinishedTurn {
   return {
     status: 'unavailable' as const,
     guidance: UNAVAILABLE_GUIDANCE,
@@ -40,7 +92,7 @@ function unavailable(crisis: boolean, calls: number) {
 }
 
 /** Saves the turn (with the text the TTS route may speak) and builds the response body. */
-function finish(sessionId: string, message: string, result: ChatResult) {
+function finish(sessionId: string, message: string, result: ChatResult): FinishedTurn {
   if (result.debug.dropped.length > 0) {
     console.info(JSON.stringify({ event: 'citation_rejected', dropped: result.debug.dropped, status: result.status }));
   }
@@ -78,7 +130,13 @@ function failed(message: string, error: unknown) {
 }
 
 /** One JSON event per line: stage, verses, delta, reset, then a final "done" carrying the full reply. */
-function streamReply(request: Request, sessionId: string, message: string): Response {
+function streamReply(
+  request: Request,
+  sessionId: string,
+  message: string,
+  profile?: DevoteeProfile,
+  memories?: CompanionMemory[],
+): Response {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -97,7 +155,15 @@ function streamReply(request: Request, sessionId: string, message: string): Resp
       let done;
       try {
         // The turn is saved even if the reader has gone, so the session history stays complete.
-        done = finish(sessionId, message, await respond(message, getSession(sessionId), emit));
+        const result = await respond(message, getSession(sessionId), emit, profile, memories);
+        done = finish(sessionId, message, result);
+        if (done.status !== 'unavailable') {
+          const verseKey = result.verses.length > 0 ? `${result.verses[0].chapter}.${result.verses[0].verse}` : undefined;
+          const newMemories = await extractMemories(message, done.guidance, memories, verseKey);
+          if (newMemories.length > 0) {
+            done = { ...done, newMemories };
+          }
+        }
       } catch (error) {
         done = failed(message, error);
       }
@@ -146,10 +212,22 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: 'Message is too long.' }, 400);
   }
 
-  if (body.stream === true) return streamReply(request, sessionId, message);
+  const profile = parseProfile(body.profile);
+  const memories = parseMemories(body.memories);
+
+  if (body.stream === true) return streamReply(request, sessionId, message, profile, memories);
 
   try {
-    return json(finish(sessionId, message, await respond(message, getSession(sessionId))));
+    const result = await respond(message, getSession(sessionId), undefined, profile, memories);
+    let done = finish(sessionId, message, result);
+    if (done.status !== 'unavailable') {
+      const verseKey = result.verses.length > 0 ? `${result.verses[0].chapter}.${result.verses[0].verse}` : undefined;
+      const newMemories = await extractMemories(message, done.guidance, memories, verseKey);
+      if (newMemories.length > 0) {
+        done = { ...done, newMemories };
+      }
+    }
+    return json(done);
   } catch (error) {
     return json(failed(message, error));
   }

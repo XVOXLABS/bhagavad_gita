@@ -1,6 +1,8 @@
 import { lookup, toDisplay, type DisplayVerse } from './corpus';
 import { embedQuery } from './embed';
 import { extractSituation, safeErrorMessage, selectVerses, writeConversation, writeReply } from './llm';
+import { type CompanionMemory } from './memory';
+import { type DevoteeProfile } from './profile';
 import {
   FALLBACK_CONVERSE,
   FIXED_LEAD_IN,
@@ -86,16 +88,22 @@ function streamer(
  * Runs the whole reply. With `emit`, progress, the chosen verse and the reply's verified sentences are
  * reported as they happen; the returned result is still the final, authoritative reply.
  */
-export async function respond(message: string, history: SessionMessage[], emit?: Emit): Promise<ChatResult> {
+export async function respond(
+  message: string,
+  history: SessionMessage[],
+  emit?: Emit,
+  profile?: DevoteeProfile | null,
+  memories?: CompanionMemory[] | null,
+): Promise<ChatResult> {
   let calls = 0;
   const priorRefs = [...new Set(history.flatMap((turn) => turn.citations ?? []))];
-  const previousLanguage = lastLanguage(history);
+  const previousLanguage = lastLanguage(history) ?? profile?.language;
 
   emit?.({ type: 'stage', stage: 'understanding' });
   let situation: Situation;
   try {
     calls += 1;
-    situation = parseSituation(await extractSituation(message, history), message, previousLanguage);
+    situation = parseSituation(await extractSituation(message, history, profile), message, previousLanguage);
   } catch (error) {
     console.info(JSON.stringify({ event: 'situation_failed', detail: safeErrorMessage(error) }));
     situation = fallbackSituation(message, previousLanguage);
@@ -116,7 +124,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
     let text: string | null = null;
     try {
       calls += 1;
-      text = parseConversation(await writeConversation(message, history, situation, live?.onText));
+      text = parseConversation(await writeConversation(message, history, situation, live?.onText, profile, memories));
     } catch (error) {
       console.info(JSON.stringify({ event: 'converse_failed', detail: safeErrorMessage(error) }));
     }
@@ -202,12 +210,12 @@ export async function respond(message: string, history: SessionMessage[], emit?:
   let reply: Reply | null = null;
   try {
     calls += 1;
-    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote, live?.onText));
+    reply = parseReply(await writeReply(message, history, situation, verses, crisis, baseNote, live?.onText, profile, memories));
     if (!reply || live?.gate.leaked || replyLeaks(reply, language, sanskrit)) {
       if (live?.gate.emitted) emit?.({ type: 'reset' });
       calls += 1;
       const note = [baseNote, reply ? RETRY_GUIDANCE_LEAK : RETRY_NOT_JSON].filter(Boolean).join('\n\n');
-      reply = parseReply(await writeReply(message, history, situation, verses, crisis, note));
+      reply = parseReply(await writeReply(message, history, situation, verses, crisis, note, undefined, profile, memories));
     }
   } catch (error) {
     console.info(JSON.stringify({ event: 'write_failed', detail: safeErrorMessage(error) }));
