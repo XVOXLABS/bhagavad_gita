@@ -13,6 +13,7 @@ import {
   parseSituation,
   replyLeaks,
   replyText,
+  stripEchoedInput,
   tidyOpener,
 } from './verify';
 
@@ -128,10 +129,19 @@ test('intent decides whether a verse is needed, and crisis always gets one', () 
   assert.deepEqual(greeting.themes, []);
   assert.equal(greeting.situation, '');
 
+  const ack = parseSituation(JSON.stringify({ intent: 'acknowledgment', replyLanguage: 'ta' }), 'சரி சரி நீ சொல்ற மாதிரி நான் பண்றேன்');
+  assert.equal(ack.intent, 'acknowledgment');
+  assert.equal(needsVerse(ack.intent), false);
+
+  const followUp = parseSituation(JSON.stringify({ intent: 'follow_up', replyLanguage: 'en' }), 'tell me more');
+  assert.equal(followUp.intent, 'follow_up');
+  assert.equal(needsVerse(followUp.intent), false);
+
   assert.equal(parseSituation(JSON.stringify({ intent: 'nonsense' }), 'x').intent, 'problem');
   const crisis = parseSituation(JSON.stringify({ intent: 'greeting', crisis: true }), 'bye forever');
   assert.equal(crisis.intent, 'problem');
   assert.equal(needsVerse(crisis.intent), true);
+  assert.equal(needsVerse('problem'), true);
 });
 
 test('reply language comes from the model, else the script, else the earlier conversation', () => {
@@ -155,6 +165,28 @@ test('a conversational reply is parsed or rejected', () => {
   assert.equal(parseConversation(JSON.stringify({ reply: ' Hello, friend. ' })), 'Hello, friend.');
   assert.equal(parseConversation('{"reply": ""}'), null);
   assert.equal(parseConversation('not json'), null);
+});
+
+test('stripEchoedInput removes parroted user text and prevents echoing', () => {
+  const userTamil = 'ஏய், எனக்கு ரொம்ப confusion ஆ இருக்கு கொஞ்சம். எந்த முடிவு எடுக்குறதுன்னு தெரியல.';
+  // Exact duplicate is replaced with compassionate default in that language
+  const strippedExact = stripEchoedInput(userTamil, userTamil, 'ta');
+  assert.equal(strippedExact, 'உன் மனதின் நிலையை நான் உணர்கிறேன், என் நண்பா.');
+
+  // Prefixed duplicate is stripped, preserving the unique reply
+  const echoedWithReply = `${userTamil}\n\nஉன் மனதில் அமைதியை நிலைநிறுத்து, நான் உன்னோடு இருக்கிறேன்.`;
+  const strippedPrefix = stripEchoedInput(echoedWithReply, userTamil, 'ta');
+  assert.equal(strippedPrefix, 'உன் மனதில் அமைதியை நிலைநிறுத்து, நான் உன்னோடு இருக்கிறேன்.');
+
+  // Genuine non-echoed reply remains untouched
+  const genuineReply = 'உன் குழப்பத்தை என்னிடம் பகிர்ந்ததற்கு நன்றி, என் நண்பா.';
+  assert.equal(stripEchoedInput(genuineReply, userTamil, 'ta'), genuineReply);
+
+  // English fallback
+  assert.equal(
+    stripEchoedInput('I am feeling so stressed today', 'I am feeling so stressed today', 'en'),
+    'I hear the weight upon your heart, my friend, and I walk beside you.',
+  );
 });
 
 test('stock openers are trimmed but real sentences are kept', () => {

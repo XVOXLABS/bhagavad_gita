@@ -5,6 +5,7 @@ import { isThemeId, themesFromText } from './themes';
 
 const INTENTS = new Set<Intent>([
   'problem',
+  'acknowledgment',
   'follow_up',
   'greeting',
   'about_me',
@@ -14,9 +15,9 @@ const INTENTS = new Set<Intent>([
   'harmful',
 ]);
 
-/** Intents answered with a verse. Everything else gets a short conversational reply. */
+/** Intents answered with a verse via RAG. Only genuine problems / life dilemmas get a verse. Everything else gets a short conversational reply. */
 export function needsVerse(intent: Intent): boolean {
-  return intent === 'problem' || intent === 'follow_up';
+  return intent === 'problem';
 }
 
 const VERSE_REF = /\d{1,2}\s*\.\s*\d{1,3}/;
@@ -186,6 +187,52 @@ export function parseReply(raw: string): Reply | null {
 
 export function replyLeaks(reply: Reply, language = 'en', sanskrit: string[] = []): boolean {
   return [reply.acknowledge, reply.connection, reply.step].some((part) => guidanceLeaks(part, language, sanskrit));
+}
+
+const DEFAULT_ACKS: Record<string, string> = {
+  ta: 'உன் மனதின் நிலையை நான் உணர்கிறேன், என் நண்பா.',
+  hi: 'मैं तुम्हारे मन की स्थिति को समझता हूँ, मेरे सखा।',
+  te: 'నీ మనసులోని భావాన్ని నేను అర్థం చేసుకుంటున్నాను, నా మిత్రమా.',
+  kn: 'ನಿನ್ನ ಮನಸ್ಸಿನ ಭಾವನೆಯನ್ನು ನಾನು ಅರಿತಿದ್ದೇನೆ, ನನ್ನ ಗೆಳೆಯ.',
+  ml: 'നിന്റെ മനസ്സിന്റെ അവസ്ഥ ഞാൻ അറിയുന്നു, എന്റെ സുഹൃത്തേ.',
+  mr: 'मी तुझ्या मनाची अवस्था समजतो, माझ्या मित्रा.',
+  bn: 'আমি তোমার মনের অবস্থা বুঝি, আমার বন্ধু।',
+  gu: 'હું તારા મનની સ્થિતિ સમજું છું, મારા મિત્ર.',
+  pa: 'ਮੈਂ ਤੁਹਾਡੇ ਮਨ ਦੀ ਸਥਿਤੀ ਨੂੰ ਸਮਝਦਾ ਹਾਂ, ਮੇਰੇ ਦੋਸਤ।',
+  en: 'I hear the weight upon your heart, my friend, and I walk beside you.',
+};
+
+export function defaultAcknowledgment(language = 'en'): string {
+  return DEFAULT_ACKS[language] ?? DEFAULT_ACKS.en;
+}
+
+/**
+ * Strips the user's own message if the model echoed or parroted it in its reply.
+ * Never allows Krishna to mirror or parrot the user's input back to them.
+ */
+export function stripEchoedInput(text: string, userMessage: string, language = 'en'): string {
+  if (!text || !userMessage) return text;
+  const cleanUser = userMessage.trim();
+  if (cleanUser.length < 5) return text;
+
+  const trimmed = text.trim();
+  // Full echo
+  if (trimmed === cleanUser || trimmed.toLowerCase() === cleanUser.toLowerCase()) {
+    return defaultAcknowledgment(language);
+  }
+
+  // Prefixed echo (e.g. user sentence followed by actual reply or punctuation)
+  if (trimmed.startsWith(cleanUser)) {
+    const remainder = trimmed.slice(cleanUser.length).replace(/^[\s.,:;!?-]+/, '').trim();
+    return remainder.length > 0 ? remainder : defaultAcknowledgment(language);
+  }
+
+  if (trimmed.toLowerCase().startsWith(cleanUser.toLowerCase())) {
+    const remainder = trimmed.slice(cleanUser.length).replace(/^[\s.,:;!?-]+/, '').trim();
+    return remainder.length > 0 ? remainder : defaultAcknowledgment(language);
+  }
+
+  return text;
 }
 
 const STOCK_OPENER =

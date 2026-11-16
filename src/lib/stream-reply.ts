@@ -84,6 +84,7 @@ export class SentenceGate {
     private readonly keys: { key: string; field: ReplyField }[],
     private readonly language: string,
     private readonly sanskrit: string[] = [],
+    private readonly userMessage: string = '',
   ) {}
 
   push(raw: string): { field: ReplyField; text: string }[] {
@@ -102,6 +103,19 @@ export class SentenceGate {
       if (from === 0) {
         chunk = chunk.trimStart();
         if (index === 0) chunk = tidyOpener(chunk);
+      }
+      if (this.userMessage && this.userMessage.trim().length >= 5) {
+        const cleanUser = this.userMessage.trim();
+        const trimmedChunk = chunk.trim();
+        if (trimmedChunk === cleanUser || trimmedChunk.toLowerCase() === cleanUser.toLowerCase()) {
+          this.released[key] = end;
+          continue;
+        }
+        if (trimmedChunk.startsWith(cleanUser)) {
+          chunk = chunk.slice(chunk.indexOf(cleanUser) + cleanUser.length).trimStart();
+        } else if (trimmedChunk.toLowerCase().startsWith(cleanUser.toLowerCase())) {
+          chunk = chunk.slice(cleanUser.length).trimStart();
+        }
       }
       if (!chunk.trim()) {
         this.released[key] = end;

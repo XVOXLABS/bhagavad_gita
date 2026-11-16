@@ -68,3 +68,12 @@ test('SentenceGate trims the stock opener from the first sentence', () => {
     { field: 'acknowledge', text: 'This has been a long, heavy week.' },
   ]);
 });
+
+test('SentenceGate suppresses chunks echoing user message', () => {
+  const userMsg = 'I am feeling so confused about my decision.';
+  const gate = new SentenceGate(REPLY_KEYS, 'en', [], userMsg);
+  // First chunk is user's exact sentence -> suppressed, remainder starts cleanly
+  assert.deepEqual(gate.push(`{"acknowledge": "${userMsg} Let peace fill your heart today."}`), [
+    { field: 'acknowledge', text: 'Let peace fill your heart today.' },
+  ]);
+});

@@ -26,6 +26,7 @@ import {
   parseSelection,
   parseSituation,
   replyLeaks,
+  stripEchoedInput,
   tidyOpener,
   type Reply,
   type SelectionResult,
@@ -64,9 +65,15 @@ function versesFor(refs: string[]): DisplayVerse[] {
 }
 
 /** Streams verified sentences of a JSON reply to `emit` as the model writes it; null when not streaming. */
-function streamer(emit: Emit | undefined, keys: typeof REPLY_KEYS, language: string, sanskrit: string[] = []) {
+function streamer(
+  emit: Emit | undefined,
+  keys: typeof REPLY_KEYS,
+  language: string,
+  sanskrit: string[] = [],
+  userMessage = '',
+) {
   if (!emit) return null;
-  const gate = new SentenceGate(keys, language, sanskrit);
+  const gate = new SentenceGate(keys, language, sanskrit, userMessage);
   return {
     gate,
     onText: (soFar: string) => {
@@ -105,7 +112,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
 
   if (!needsVerse(situation.intent) && !restate) {
     emit?.({ type: 'stage', stage: 'writing' });
-    const live = streamer(emit, CONVERSE_KEYS, language);
+    const live = streamer(emit, CONVERSE_KEYS, language, [], message);
     let text: string | null = null;
     try {
       calls += 1;
@@ -117,6 +124,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
       if (live?.gate.emitted) emit?.({ type: 'reset' });
       text = FALLBACK_CONVERSE;
     }
+    text = stripEchoedInput(text, message, language);
     text = tidyOpener(text);
     return {
       status: 'conversation',
@@ -189,7 +197,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
   emit?.({ type: 'stage', stage: 'writing' });
   // With no verse the connection is dropped below, so it is never streamed either.
   const keys = verses.length > 0 ? REPLY_KEYS : REPLY_KEYS.filter((entry) => entry.field !== 'connection');
-  const live = streamer(emit, keys, language, sanskrit);
+  const live = streamer(emit, keys, language, sanskrit, message);
 
   let reply: Reply | null = null;
   try {
@@ -211,7 +219,7 @@ export async function respond(message: string, history: SessionMessage[], emit?:
     replyLanguage = 'en';
   }
   if (verses.length === 0) reply = { ...reply, connection: '' };
-  reply = { ...reply, acknowledge: tidyOpener(reply.acknowledge) };
+  reply = { ...reply, acknowledge: tidyOpener(stripEchoedInput(reply.acknowledge, message, replyLanguage)) };
 
   return { status, reply, verses, crisis, language: replyLanguage, calls, debug };
 }

@@ -33,9 +33,10 @@ const QUERY_GROUPS: string[][] = [
   ['financial', 'finance', 'money', 'wealth', 'riches'],
 ];
 
-/** What the message is. Only `problem` and `follow_up` get a verse. */
+/** What the message is. Only `problem` triggers RAG and gets a verse. */
 export type Intent =
   | 'problem'
+  | 'acknowledgment'
   | 'follow_up'
   | 'greeting'
   | 'about_me'

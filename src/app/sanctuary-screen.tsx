@@ -56,16 +56,16 @@ type ChatResponse = {
 type UiMessage =
   | { id: string; role: 'user'; text: string }
   | {
-      id: string;
-      role: 'assistant';
-      reply: Reply;
-      verses: DisplayVerse[];
-      crisis: Crisis;
-      language: string;
-      status: 'answered' | 'no_strong_match' | 'conversation';
-      replyId?: string;
-      streaming?: boolean;
-    }
+    id: string;
+    role: 'assistant';
+    reply: Reply;
+    verses: DisplayVerse[];
+    crisis: Crisis;
+    language: string;
+    status: 'answered' | 'no_strong_match' | 'conversation';
+    replyId?: string;
+    streaming?: boolean;
+  }
   | { id: string; role: 'error'; text: string; crisis: Crisis };
 
 const UNAVAILABLE_TEXT = 'Let us pause for a moment. Please speak with me again.';
@@ -98,7 +98,7 @@ async function readStream(
       // Ignore partial json lines
     }
   };
-  for (;;) {
+  for (; ;) {
     const { value, done: finished } = await reader.read();
     if (finished) break;
     buffer += decoder.decode(value, { stream: true });
@@ -151,13 +151,13 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   const browserDictation = useDictation(micLang);
   const dictation: Listener = recorder.supported
     ? {
-        ...recorder,
-        start: (onEnd, options) =>
-          recorder.start((result) => {
-            if (result.error === 'unavailable') setSttDown(true);
-            onEnd(result);
-          }, options),
-      }
+      ...recorder,
+      start: (onEnd, options) =>
+        recorder.start((result) => {
+          if (result.error === 'unavailable') setSttDown(true);
+          onEnd(result);
+        }, options),
+    }
     : browserDictation;
 
   function flash(text: string) {
@@ -187,9 +187,9 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       hearing,
       onHear: voice.supported
         ? () => {
-            if (hearing) voice.stop();
-            else voice.speak(verseRef(verse), verseToSpeak(verse));
-          }
+          if (hearing) voice.stop();
+          else voice.speak(verseRef(verse), verseToSpeak(verse));
+        }
         : undefined,
       onToggleSave: () => {
         savedVerses.toggle(verse);
@@ -607,20 +607,19 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           {/* Integrated Mic Button on the Left */}
           <button
             type="button"
-            className={`bar-mic-btn ${
-              currentMode === 'listening'
-                ? 'bar-mic-listening'
-                : currentMode === 'speaking'
+            className={`bar-mic-btn ${currentMode === 'listening'
+              ? 'bar-mic-listening'
+              : currentMode === 'speaking'
                 ? 'bar-mic-speaking'
                 : ''
-            }`}
+              }`}
             onClick={handleMicTap}
             title={
               currentMode === 'listening'
                 ? 'Pause listening'
                 : currentMode === 'speaking'
-                ? 'Tap to pause Krishna'
-                : 'Speak aloud to Krishna'
+                  ? 'Tap to pause Krishna'
+                  : 'Speak aloud to Krishna'
             }
             aria-label="Voice input"
           >
@@ -642,8 +641,8 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
               currentMode === 'listening'
                 ? 'Listening to your voice… (speak freely)'
                 : currentMode === 'thinking' || pending === 'send'
-                ? 'Krishna is reflecting on your words…'
-                : 'Share what is on your heart with Krishna…'
+                  ? 'Krishna is reflecting on your words…'
+                  : 'Share what is on your heart with Krishna…'
             }
             value={draft}
             maxLength={2000}
@@ -716,8 +715,8 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
                     {msg.role === 'user'
                       ? msg.text
                       : msg.role === 'assistant'
-                      ? [msg.reply.acknowledge, msg.reply.connection, msg.reply.step].filter(Boolean).join('\n\n')
-                      : msg.text}
+                        ? [msg.reply.acknowledge, msg.reply.connection, msg.reply.step].filter(Boolean).join('\n\n')
+                        : msg.text}
                   </p>
                   {msg.role === 'assistant' && msg.verses.length > 0 ? (
                     <button
