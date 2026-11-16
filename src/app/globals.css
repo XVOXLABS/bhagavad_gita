@@ -2847,6 +2847,27 @@ a.brand {
   gap: var(--space-4);
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+  padding: 6px 0;
+}
+
+.toggle-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggle-sub {
+  font-size: var(--size-12);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 /* Persona Chip in Top HUD */
 .sanctuary-persona-chip {
   gap: var(--space-2);

@@ -11,6 +11,8 @@ import {
   TALK_OFF,
   VAD,
   voiceForLanguage,
+  checkBargeIn,
+  initialBargeInTracker,
   type TalkState,
 } from './speech';
 
@@ -125,3 +127,64 @@ test('voice activity: stops after a pause that follows speech, or when nothing i
   manual = nextVadState(manual, 0.001, VAD.maxMs, false);
   assert.equal(manual.reason, 'max');
 });
+
+test('barge-in: detects sustained human speech and ignores short transient clicks', () => {
+  let tracker = initialBargeInTracker();
+
+  // 1. Single transient click (e.g. 60ms click) should not trigger
+  tracker = checkBargeIn(tracker, 0.08, 60);
+  assert.equal(tracker.triggered, false);
+  assert.equal(tracker.sustainedMs, 60);
+
+  // 2. Silence immediately following should decay
+  tracker = checkBargeIn(tracker, 0.01, 60);
+  assert.equal(tracker.triggered, false);
+  assert.equal(tracker.sustainedMs, 0);
+
+  // 3. Sustained human voice (> 180ms) triggers barge-in
+  tracker = checkBargeIn(tracker, 0.06, 60); // 60ms
+  assert.equal(tracker.triggered, false);
+  tracker = checkBargeIn(tracker, 0.05, 60); // 120ms
+  assert.equal(tracker.triggered, false);
+  tracker = checkBargeIn(tracker, 0.07, 60); // 180ms -> Trigger!
+  assert.equal(tracker.triggered, true);
+  assert.equal(tracker.sustainedMs, 180);
+});
+
+test('barge-in interruption during speaking and thinking transitions cleanly to listening', () => {
+  // Scenario 1: Krishna is speaking, devotee interrupts (via voice or tap)
+  const speakingState: TalkState = {
+    mode: 'speaking',
+    misses: 0,
+    pauseAfterSpeaking: false,
+    turn: 2,
+    note: '',
+  };
+
+  const interruptedFromSpeaking = nextTalkState(speakingState, { type: 'interrupt' });
+  assert.equal(interruptedFromSpeaking.mode, 'listening');
+  assert.equal(interruptedFromSpeaking.turn, 3);
+
+  const startFromSpeaking = nextTalkState(speakingState, { type: 'start' });
+  assert.equal(startFromSpeaking.mode, 'listening');
+  assert.equal(startFromSpeaking.turn, 3);
+
+  // Scenario 2: Krishna is thinking, devotee interrupts
+  const thinkingState: TalkState = {
+    mode: 'thinking',
+    misses: 0,
+    pauseAfterSpeaking: false,
+    turn: 4,
+    note: '',
+  };
+
+  const interruptedFromThinking = nextTalkState(thinkingState, { type: 'interrupt' });
+  assert.equal(interruptedFromThinking.mode, 'listening');
+  assert.equal(interruptedFromThinking.turn, 5);
+
+  const startFromThinking = nextTalkState(thinkingState, { type: 'start' });
+  assert.equal(startFromThinking.mode, 'listening');
+  assert.equal(startFromThinking.turn, 5);
+});
+
+

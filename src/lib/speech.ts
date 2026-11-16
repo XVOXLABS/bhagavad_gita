@@ -112,6 +112,50 @@ export const VAD = {
   maxMs: 60_000,
 };
 
+export const BARGE_IN_DEFAULTS = {
+  threshold: 0.042,
+  minDurationMs: 180,
+  checkIntervalMs: 60,
+};
+
+export type BargeInTracker = {
+  sustainedMs: number;
+  triggered: boolean;
+};
+
+export function initialBargeInTracker(): BargeInTracker {
+  return { sustainedMs: 0, triggered: false };
+}
+
+/**
+ * Evaluates an echo-cancelled audio frame to detect intentional human speech interruption.
+ * Filters out short transient noise (clicks, desk thumps < 100ms) by requiring sustained speech energy.
+ */
+export function checkBargeIn(
+  tracker: BargeInTracker,
+  rms: number,
+  frameMs = BARGE_IN_DEFAULTS.checkIntervalMs,
+  threshold = BARGE_IN_DEFAULTS.threshold,
+  minDurationMs = BARGE_IN_DEFAULTS.minDurationMs,
+): BargeInTracker {
+  if (tracker.triggered) return tracker;
+
+  if (rms >= threshold) {
+    const nextSustained = tracker.sustainedMs + frameMs;
+    return {
+      sustainedMs: nextSustained,
+      triggered: nextSustained >= minDurationMs,
+    };
+  }
+
+  // Decay sustained energy when below threshold
+  const decayed = Math.max(0, tracker.sustainedMs - frameMs * 1.5);
+  return {
+    sustainedMs: decayed,
+    triggered: false,
+  };
+}
+
 export function startVad(now: number): VadState {
   return { startedAt: now, heardSpeech: false, lastVoiceAt: now, stop: false, reason: '' };
 }
@@ -178,12 +222,13 @@ export function nextTalkState(state: TalkState, event: TalkEvent): TalkState {
     case 'thinking':
       if (event.type === 'replied') return { ...state, mode: 'speaking', pauseAfterSpeaking: event.pause };
       if (event.type === 'failed') return { ...state, mode: 'paused', note: event.note };
+      if (event.type === 'interrupt' || event.type === 'start') return listen(state);
       return state;
     case 'speaking':
       if (event.type === 'doneSpeaking') {
         return state.pauseAfterSpeaking ? { ...state, mode: 'paused', note: 'Tap to continue when you are ready.' } : listen(state);
       }
-      if (event.type === 'interrupt') return listen(state);
+      if (event.type === 'interrupt' || event.type === 'start') return listen(state);
       return state;
     default:
       return state;

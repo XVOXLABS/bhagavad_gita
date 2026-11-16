@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ElevenError, elevenConfig, KRISHNA_VOICE_SETTINGS, redactEleven, streamSpeech, transcribe } from './elevenlabs';
+import {
+  ElevenError,
+  elevenConfig,
+  KRISHNA_VOICE_SETTINGS,
+  redactEleven,
+  streamSpeech,
+  transcribe,
+  deleteHistoryItem,
+  deleteTranscription,
+} from './elevenlabs';
 
 const config = elevenConfig({ ELEVENLABS_API_KEY: 'sk_testkey123', ELEVENLABS_VOICE_ID: 'voice42' });
 
@@ -67,3 +76,41 @@ test('transcription sends the audio to Scribe and returns text and language', as
   assert.equal((form as FormData).get('language_code'), 'ta');
   assert.ok((form as FormData).get('file') instanceof Blob);
 });
+
+test('deleteHistoryItem and deleteTranscription make DELETE requests with auth header', async () => {
+  const calls: { url: string; method?: string; key?: string }[] = [];
+  const fake = (async (url: string, init: RequestInit) => {
+    calls.push({ url, method: init.method, key: (init.headers as Record<string, string>)['xi-api-key'] });
+    return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+  }) as unknown as typeof fetch;
+
+  const historyResult = await deleteHistoryItem('hist_123', config, fake);
+  assert.equal(historyResult, true);
+  assert.equal(calls[0].url, 'https://api.elevenlabs.io/v1/history/hist_123');
+  assert.equal(calls[0].method, 'DELETE');
+  assert.equal(calls[0].key, 'sk_testkey123');
+
+  const sttResult = await deleteTranscription('trans_456', config, fake);
+  assert.equal(sttResult, true);
+  assert.equal(calls[1].url, 'https://api.elevenlabs.io/v1/speech-to-text/transcripts/trans_456');
+  assert.equal(calls[1].method, 'DELETE');
+  assert.equal(calls[1].key, 'sk_testkey123');
+});
+
+test('transcribe triggers auto-deletion when transcription_id is present', async () => {
+  let deletedId = '';
+  const fake = (async (url: string, init: RequestInit) => {
+    if (init.method === 'DELETE') {
+      deletedId = url.split('/').pop() || '';
+      return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+    }
+    return Response.json({ text: 'Devotee speaks', transcription_id: 'transcript_xyz789' });
+  }) as unknown as typeof fetch;
+
+  const res = await transcribe(new Blob([new Uint8Array(5)]), undefined, config, fake);
+  assert.equal(res.text, 'Devotee speaks');
+  // Wait a tick for background async delete
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(deletedId, 'transcript_xyz789');
+});
+

@@ -33,6 +33,7 @@ import {
 } from '@/lib/supabase';
 import { migrateGuestDataToCloud, pullCloudUserData } from '@/lib/sync';
 import { speakableText } from '@/lib/speech';
+import { useBargeIn, BARGE_IN_PREF_KEY } from './use-barge-in';
 import { avatarEngine } from './avatar/anam-engine';
 import { KrishnaAvatar, useAvatarState } from './avatar/krishna-avatar';
 import {
@@ -178,6 +179,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   const [service, setService] = useState({ tts: false, stt: false, avatar: false });
   const [naturalPref, setNaturalPref] = useState(true);
   const [avatarPref, setAvatarPref] = useState(true);
+  const [bargeInPref, setBargeInPref] = useState(true);
   const [micLang, setMicLang] = useState('en-IN');
   const [sttDown, setSttDown] = useState(false);
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -347,6 +349,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
     setNaturalPref(readPref(NATURAL_KEY) !== '0');
     setAvatarPref(readPref(AVATAR_KEY) !== '0');
+    setBargeInPref(readPref(BARGE_IN_PREF_KEY) !== '0');
     const savedLang = readPref(MIC_LANG_KEY);
     if (savedLang && MIC_LANGS.some((item) => item.code === savedLang)) setMicLang(savedLang);
 
@@ -416,7 +419,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     wordQueueRef.current = [];
     currentWindowRef.current = '';
     setCaption('');
-    setIsStreaming(true);
+    setIsStreaming(false);
     setMessages((curr) => [...curr, { id: uid(), role: 'user', text: message }]);
 
     const id = uid();
@@ -546,6 +549,21 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     setIsStreaming(false);
   }
 
+  const isSpeaking = Boolean(voice.speakingId) || talk.state.mode === 'speaking';
+
+  // Hands-Free Voice Barge-In (ChatGPT Advanced Voice Mode style):
+  // Listens via Acoustic Echo Cancellation (AEC) while Krishna speaks.
+  // When the devotee speaks aloud, automatically cuts Krishna off and starts listening!
+  useBargeIn({
+    enabled: bargeInPref,
+    isSpeaking,
+    onBargeIn: () => {
+      stopKrishnaSpeaking();
+      talk.interrupt();
+      flash('I hear you… listening');
+    },
+  });
+
   function handleMicTap() {
     unlockAudio();
     if (!callActive) {
@@ -553,11 +571,10 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       return;
     }
 
-    const isSpeaking = Boolean(voice.speakingId) || isStreaming || talk.state.mode === 'speaking';
     if (isSpeaking) {
       // Instant Barge-In: immediately interrupt Krishna and start listening to the devotee
       stopKrishnaSpeaking();
-      talk.begin();
+      talk.interrupt();
       return;
     }
 
@@ -950,7 +967,10 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
               {service.tts ? (
                 <label className="toggle-row">
-                  <span>Natural Spoken Voice (ElevenLabs)</span>
+                  <div className="toggle-label-group">
+                    <span>Natural Spoken Voice (ElevenLabs)</span>
+                    <span className="toggle-sub">Auto-deletes from cloud history after speaking. Turn off for 100% on-device private voice.</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={naturalPref}
@@ -975,6 +995,21 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
                   />
                 </label>
               ) : null}
+
+              <label className="toggle-row">
+                <div className="toggle-label-group">
+                  <span>Hands-Free Voice Interruption</span>
+                  <span className="toggle-sub">Speak aloud to interrupt Krishna at any time (uses Echo Cancellation)</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={bargeInPref}
+                  onChange={(e) => {
+                    setBargeInPref(e.target.checked);
+                    writePref(BARGE_IN_PREF_KEY, e.target.checked ? '1' : '0');
+                  }}
+                />
+              </label>
             </div>
           </div>
         </div>

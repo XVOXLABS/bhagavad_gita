@@ -83,7 +83,62 @@ export async function streamSpeech(
     },
   );
   if (!response.ok || !response.body) throw await failure(response);
+
+  const historyItemId = response.headers.get('history-item-id') || response.headers.get('history_item_id');
+  if (historyItemId) {
+    // Zero-retention: delete the history item from ElevenLabs as soon as generation completes
+    const transform = new TransformStream<Uint8Array, Uint8Array>({
+      flush() {
+        void deleteHistoryItem(historyItemId, config, fetcher).catch(() => undefined);
+      },
+    });
+    return response.body.pipeThrough(transform);
+  }
+
   return response.body;
+}
+
+/**
+ * Deletes a generated audio item and its text transcript from ElevenLabs history.
+ * Ensures zero data retention on ElevenLabs servers for the user's conversation.
+ */
+export async function deleteHistoryItem(
+  historyItemId: string,
+  config: ElevenConfig = elevenConfig(),
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> {
+  if (!config.apiKey || !historyItemId) return false;
+  try {
+    const response = await fetcher(`${API}/history/${encodeURIComponent(historyItemId)}`, {
+      method: 'DELETE',
+      headers: { 'xi-api-key': config.apiKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes a speech-to-text transcript from ElevenLabs servers immediately after transcription.
+ */
+export async function deleteTranscription(
+  transcriptionId: string,
+  config: ElevenConfig = elevenConfig(),
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> {
+  if (!config.apiKey || !transcriptionId) return false;
+  try {
+    const response = await fetcher(`${API}/speech-to-text/transcripts/${encodeURIComponent(transcriptionId)}`, {
+      method: 'DELETE',
+      headers: { 'xi-api-key': config.apiKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 export type Transcript = { text: string; language: string | null };
@@ -107,7 +162,12 @@ export async function transcribe(
     signal: AbortSignal.timeout(45_000),
   });
   if (!response.ok) throw await failure(response);
-  const data = (await response.json()) as { text?: unknown; language_code?: unknown };
+  const data = (await response.json()) as { text?: unknown; language_code?: unknown; transcription_id?: unknown };
+  const transcriptionId = typeof data.transcription_id === 'string' ? data.transcription_id : null;
+  if (transcriptionId) {
+    // Zero-retention: delete transcript from ElevenLabs immediately
+    void deleteTranscription(transcriptionId, config, fetcher).catch(() => undefined);
+  }
   return {
     text: typeof data.text === 'string' ? data.text.replace(/\s+/g, ' ').trim() : '',
     language: typeof data.language_code === 'string' ? data.language_code : null,

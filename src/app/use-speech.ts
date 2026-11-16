@@ -343,9 +343,17 @@ export function useDictation(lang: string) {
       try {
         recognition.start();
       } catch {
-        active.current = null;
-        setListening(false);
-        onEnd({ text: '', error: 'failed' });
+        // If the speech engine is resetting after aborting the previous utterance, retry once after 100ms
+        window.setTimeout(() => {
+          if (active.current !== recognition) return;
+          try {
+            recognition.start();
+          } catch {
+            active.current = null;
+            setListening(false);
+            onEnd({ text: '', error: 'failed' });
+          }
+        }, 100);
       }
     },
     [lang],
@@ -436,13 +444,25 @@ export function useRecorder(lang: string, enabled: boolean) {
         active.current.cancelled = true;
         finish();
       }
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-      } catch {
-        onEnd({ text: '', error: 'not-allowed' });
+      let stream: MediaStream | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+          break;
+        } catch (err) {
+          if (err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+            onEnd({ text: '', error: 'not-allowed' });
+            return;
+          }
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 80));
+          }
+        }
+      }
+      if (!stream) {
+        onEnd({ text: '', error: 'failed' });
         return;
       }
       const mimeType = RECORDER_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
