@@ -76,16 +76,11 @@ function streamer(
 ) {
   if (!emit) return null;
   const gate = new SentenceGate(keys, language, sanskrit, userMessage);
-  let firstClauseSent = false;
   return {
     gate,
     onText: (soFar: string) => {
       for (const delta of gate.push(soFar)) {
         emit({ type: 'delta', ...delta });
-        if (!firstClauseSent && delta.text.trim()) {
-          firstClauseSent = true;
-          emit({ type: 'first_clause', text: delta.text.trim(), language });
-        }
       }
     },
   };

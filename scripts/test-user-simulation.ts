@@ -78,7 +78,7 @@ async function runSimulation() {
 
         const replyContent = replyText(result.reply);
         console.log(`Status: ${result.status}`);
-        console.log(`Intent detected: ${result.situation?.intent}`);
+        console.log(`Intent detected: ${result.debug.situation.intent}`);
         console.log(`Verses cited: ${result.verses.map((v) => `${v.chapter}.${v.verse}`).join(', ') || 'None'}`);
         console.log(`Krishna Reply:\n${replyContent}\n`);
 
