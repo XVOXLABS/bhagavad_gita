@@ -137,6 +137,10 @@ test('intent decides whether a verse is needed, and crisis always gets one', () 
   assert.equal(followUp.intent, 'follow_up');
   assert.equal(needsVerse(followUp.intent), false);
 
+  const companion = parseSituation(JSON.stringify({ intent: 'companion', replyLanguage: 'ta' }), 'bore அடிக்குது என்கூட பேசுடா');
+  assert.equal(companion.intent, 'companion');
+  assert.equal(needsVerse(companion.intent), false);
+
   assert.equal(parseSituation(JSON.stringify({ intent: 'nonsense' }), 'x').intent, 'problem');
   const crisis = parseSituation(JSON.stringify({ intent: 'greeting', crisis: true }), 'bye forever');
   assert.equal(crisis.intent, 'problem');

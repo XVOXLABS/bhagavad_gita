@@ -5,6 +5,7 @@ import { isThemeId, themesFromText } from './themes';
 
 const INTENTS = new Set<Intent>([
   'problem',
+  'companion',
   'acknowledgment',
   'follow_up',
   'greeting',

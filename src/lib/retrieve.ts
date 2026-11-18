@@ -36,6 +36,7 @@ const QUERY_GROUPS: string[][] = [
 /** What the message is. Only `problem` triggers RAG and gets a verse. */
 export type Intent =
   | 'problem'
+  | 'companion'
   | 'acknowledgment'
   | 'follow_up'
   | 'greeting'

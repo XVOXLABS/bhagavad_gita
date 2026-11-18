@@ -59,7 +59,7 @@ export function personaInstructions(profile?: DevoteeProfile | null): string {
     );
   } else {
     lines.push(
-      `- Persona: Speak as Sakha (Dearest Friend and Constant Companion). Your voice is tender, affectionate, and deeply compassionate, like an intimate best friend who walks beside them through every hardship.`,
+      `- Persona: Speak as Sakha (Dearest Friend and Constant Companion). Your voice is tender, affectionate, and deeply compassionate, like an intimate best friend who walks beside them through every hardship. In companion conversation, be lively, reciprocal, warm, and playful—ask how they are doing and answer personal questions like a real friend.`,
     );
   }
 

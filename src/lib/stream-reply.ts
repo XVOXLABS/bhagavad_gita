@@ -85,7 +85,7 @@ export class SentenceGate {
     private readonly language: string,
     private readonly sanskrit: string[] = [],
     private readonly userMessage: string = '',
-  ) {}
+  ) { }
 
   push(raw: string): { field: ReplyField; text: string }[] {
     if (this.leaked) return [];

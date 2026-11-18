@@ -31,14 +31,7 @@ export async function GET(request: Request): Promise<Response> {
     const sessionId = url.searchParams.get('sessionId')?.trim() ?? '';
     const replyId = url.searchParams.get('replyId')?.trim() ?? '';
     if (!sessionId || sessionId.length > 80 || !replyId || replyId.length > 80) return fail(400, 'bad_request');
-    let reply = findReply(sessionId, replyId);
-    if (!reply) {
-      for (let i = 0; i < 8; i += 1) {
-        await new Promise((r) => setTimeout(r, 50));
-        reply = findReply(sessionId, replyId);
-        if (reply) break;
-      }
-    }
+    const reply = findReply(sessionId, replyId);
     if (!reply) return fail(404, 'unknown_reply');
     speech = reply.speech;
     language = reply.language;

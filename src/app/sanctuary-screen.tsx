@@ -75,8 +75,6 @@ type StreamEvent =
   | { type: 'stage'; stage: Stage }
   | { type: 'verses'; verses: DisplayVerse[]; crisis: Crisis }
   | { type: 'delta'; field: keyof Reply; text: string }
-  | { type: 'speech_start'; replyId: string; text: string; language: string }
-  | { type: 'memories'; newMemories: { fact: string; category?: MemoryCategory; associatedVerse?: string }[] }
   | { type: 'reset' }
   | ({ type: 'done' } & ChatResponse);
 
@@ -223,39 +221,16 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
   const recorder = useRecorder(micLang, service.stt && naturalPref && !sttDown);
   const browserDictation = useDictation(micLang);
-  const dictation: Listener = {
-    supported: browserDictation.supported || recorder.supported,
-    listening: browserDictation.listening || recorder.listening,
-    interim: browserDictation.interim || recorder.interim,
-    level: recorder.level,
-    transcribing: recorder.transcribing,
-    start: (onEnd, options) => {
-      if (browserDictation.supported) {
-        browserDictation.start((res) => {
-          if (res.text) {
-            onEnd(res);
-          } else if (recorder.supported) {
-            void recorder.start(onEnd, options);
-          } else {
-            onEnd(res);
-          }
-        }, options);
-      } else if (recorder.supported) {
-        void recorder.start((result) => {
+  const dictation: Listener = recorder.supported
+    ? {
+      ...recorder,
+      start: (onEnd, options) =>
+        recorder.start((result) => {
           if (result.error === 'unavailable') setSttDown(true);
           onEnd(result);
-        }, options);
-      }
-    },
-    stop: () => {
-      browserDictation.stop();
-      recorder.stop();
-    },
-    cancel: () => {
-      browserDictation.cancel();
-      recorder.cancel();
-    },
-  };
+        }, options),
+    }
+    : browserDictation;
 
   function flash(_text: string) {
     // Screen toast removed
@@ -545,7 +520,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     speakNow();
   }
 
-  async function sendMessage(text: string, onEarly?: (turn: TalkTurn) => void): Promise<TalkTurn> {
+  async function sendMessage(text: string): Promise<TalkTurn> {
     const message = text.trim();
     if (!message) return { speak: '', pause: true };
     setPending('send');
@@ -592,17 +567,6 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           ...item,
           reply: { ...item.reply, [event.field]: item.reply[event.field] + event.text },
         }));
-      } else if (event.type === 'speech_start') {
-        const remoteUrl = ttsUrl(event.replyId);
-        onEarly?.({ speak: event.text, pause: false, language: event.language, remoteUrl });
-      } else if (event.type === 'memories') {
-        if (event.newMemories && event.newMemories.length > 0) {
-          const merged = mergeMemories(readMemories(), event.newMemories);
-          writeMemories(merged);
-          setMemories(merged);
-          const snippet = event.newMemories[0].fact.slice(0, 45);
-          flash(`Krishna remembered: "${snippet}…"`);
-        }
       } else if (event.type === 'reset') {
         wordQueueRef.current = [];
         currentWindowRef.current = '';
