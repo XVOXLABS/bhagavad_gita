@@ -24,6 +24,7 @@ import {
 } from '@/lib/memory';
 import type { User } from '@supabase/supabase-js';
 import {
+  cleanAuthUrlHash,
   getCurrentUser,
   getSupabase,
   isSupabaseConfigured,
@@ -31,7 +32,15 @@ import {
   signInWithGoogle,
   signOut,
 } from '@/lib/supabase';
-import { migrateGuestDataToCloud, pullCloudUserData } from '@/lib/sync';
+import {
+  migrateGuestDataToCloud,
+  pullCloudUserData,
+  syncUserData,
+  isAutoSyncEnabled,
+  setAutoSyncEnabled,
+  getLastSyncedAt,
+  formatLastSynced,
+} from '@/lib/sync';
 import { speakableText } from '@/lib/speech';
 import { useBargeIn, BARGE_IN_PREF_KEY } from './use-barge-in';
 import { avatarEngine } from './avatar/anam-engine';
@@ -41,10 +50,9 @@ import {
   Lotus,
   MicIcon,
   SendIcon,
-  SlidersIcon,
   VolumeIcon,
 } from './icons';
-import { useSavedVerses, verseRef } from './saved';
+import { useSavedVerses, verseRef, SAVED_EVENT } from './saved';
 import { shareVerse } from './share-card';
 import { uid } from './uid';
 import { VerseCard, type VerseActions, verseToSpeak } from './verse-card';
@@ -67,6 +75,8 @@ type StreamEvent =
   | { type: 'stage'; stage: Stage }
   | { type: 'verses'; verses: DisplayVerse[]; crisis: Crisis }
   | { type: 'delta'; field: keyof Reply; text: string }
+  | { type: 'speech_start'; replyId: string; text: string; language: string }
+  | { type: 'memories'; newMemories: { fact: string; category?: MemoryCategory; associatedVerse?: string }[] }
   | { type: 'reset' }
   | ({ type: 'done' } & ChatResponse);
 
@@ -107,8 +117,15 @@ const FACE_WAIT_MS = 6000;
 const MIC_LANG_KEY = 'gita.micLang';
 const MIC_LANGS = [
   { code: 'en-IN', label: 'English (India)' },
-  { code: 'hi-IN', label: 'Hindi' },
-  { code: 'ta-IN', label: 'Tamil' },
+  { code: 'hi-IN', label: 'Hindi (हिंदी)' },
+  { code: 'ta-IN', label: 'Tamil (தமிழ்)' },
+  { code: 'te-IN', label: 'Telugu (తెలుగు)' },
+  { code: 'kn-IN', label: 'Kannada (ಕನ್ನಡ)' },
+  { code: 'ml-IN', label: 'Malayalam (മലയാളം)' },
+  { code: 'mr-IN', label: 'Marathi (मराठी)' },
+  { code: 'bn-IN', label: 'Bengali (বাংলা)' },
+  { code: 'gu-IN', label: 'Gujarati (ગુજરાતી)' },
+  { code: 'pa-IN', label: 'Punjabi (ਪੰਜਾਬੀ)' },
 ];
 
 async function readStream(
@@ -143,28 +160,39 @@ async function readStream(
   return done;
 }
 
+function getDevoteeDisplayName(profile: DevoteeProfile, user: User | null): string {
+  if (profile.preferredName?.trim()) {
+    return profile.preferredName.trim();
+  }
+  const metaName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+  if (typeof metaName === 'string' && metaName.trim()) {
+    return metaName.trim();
+  }
+  if (user?.email) {
+    const raw = user.email.split('@')[0];
+    const lettersOnly = raw.replace(/[0-9_.-]/g, '');
+    if (lettersOnly.length >= 2) {
+      return lettersOnly.charAt(0).toUpperCase() + lettersOnly.slice(1);
+    }
+    return raw;
+  }
+  return 'Devotee';
+}
+
 export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   const [sessionId] = useState(() => uid());
   const [callActive, setCallActive] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [personalizeOpen, setPersonalizeOpen] = useState(false);
-  const [memoriesOpen, setMemoriesOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPending, setAuthPending] = useState(false);
-  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [lastSyncedAt, setLastSyncedAtState] = useState<number | null>(() => getLastSyncedAt());
+  const autoSyncDebounceRef = useRef<number | null>(null);
+  const lastFocusSyncRef = useRef<number>(0);
   const [profile, setProfile] = useState<DevoteeProfile>(defaultProfile);
-  const [profileDraft, setProfileDraft] = useState<DevoteeProfile>(defaultProfile);
   const [memories, setMemories] = useState<CompanionMemory[]>([]);
-  const [newMemoryText, setNewMemoryText] = useState('');
-  const [newMemoryCategory, setNewMemoryCategory] = useState<MemoryCategory>('life_context');
-  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
   const [verseDrawer, setVerseDrawer] = useState<DisplayVerse | null>(null);
   const [draft, setDraft] = useState('');
-  const [notice, setNotice] = useState('');
   const [sharingRef, setSharingRef] = useState<string | null>(null);
 
   // Live streaming subtitle queue (strictly 1-2 lines)
@@ -195,20 +223,42 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
   const recorder = useRecorder(micLang, service.stt && naturalPref && !sttDown);
   const browserDictation = useDictation(micLang);
-  const dictation: Listener = recorder.supported
-    ? {
-      ...recorder,
-      start: (onEnd, options) =>
-        recorder.start((result) => {
+  const dictation: Listener = {
+    supported: browserDictation.supported || recorder.supported,
+    listening: browserDictation.listening || recorder.listening,
+    interim: browserDictation.interim || recorder.interim,
+    level: recorder.level,
+    transcribing: recorder.transcribing,
+    start: (onEnd, options) => {
+      if (browserDictation.supported) {
+        browserDictation.start((res) => {
+          if (res.text) {
+            onEnd(res);
+          } else if (recorder.supported) {
+            void recorder.start(onEnd, options);
+          } else {
+            onEnd(res);
+          }
+        }, options);
+      } else if (recorder.supported) {
+        void recorder.start((result) => {
           if (result.error === 'unavailable') setSttDown(true);
           onEnd(result);
-        }, options),
-    }
-    : browserDictation;
+        }, options);
+      }
+    },
+    stop: () => {
+      browserDictation.stop();
+      recorder.stop();
+    },
+    cancel: () => {
+      browserDictation.cancel();
+      recorder.cancel();
+    },
+  };
 
-  function flash(text: string) {
-    setNotice(text);
-    window.setTimeout(() => setNotice((curr) => (curr === text ? '' : curr)), 3200);
+  function flash(_text: string) {
+    // Screen toast removed
   }
 
   async function share(verse: DisplayVerse) {
@@ -309,7 +359,6 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   useEffect(() => {
     const loaded = readProfile();
     setProfile(loaded);
-    setProfileDraft(loaded);
 
     const loadedMemories = readMemories();
     setMemories(loadedMemories);
@@ -317,7 +366,6 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     const onProfileChange = () => {
       const refreshed = readProfile();
       setProfile(refreshed);
-      setProfileDraft(refreshed);
     };
 
     const onMemoriesChange = () => {
@@ -331,8 +379,19 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     void getCurrentUser().then((u) => {
       setUser(u);
       if (u) {
-        void pullCloudUserData(u.id);
+        setSyncStatus('syncing');
+        void syncUserData(u.id)
+          .then((res) => {
+            if (res.success) {
+              setSyncStatus('synced');
+              setLastSyncedAtState(Date.now());
+            } else {
+              setSyncStatus('error');
+            }
+          })
+          .catch(() => setSyncStatus('error'));
       }
+      cleanAuthUrlHash();
     });
 
     const sb = getSupabase();
@@ -340,12 +399,20 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       const authUser = session?.user ?? null;
       setUser(authUser);
       if (authUser && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
-        await migrateGuestDataToCloud(authUser.id);
-        await pullCloudUserData(authUser.id);
-        const name = authUser.email ? authUser.email.split('@')[0] : 'Devotee';
-        flash(`Welcome, ${name}! Your journey & memories are synced.`);
+        setSyncStatus('syncing');
+        const res = await syncUserData(authUser.id);
+        if (res.success) {
+          setSyncStatus('synced');
+          setLastSyncedAtState(Date.now());
+        } else {
+          setSyncStatus('error');
+        }
       }
+      cleanAuthUrlHash();
     });
+
+    // Fallback cleanup timer in case of redirect errors or unhandled fragments
+    const hashCleanTimer = window.setTimeout(cleanAuthUrlHash, 600);
 
     setNaturalPref(readPref(NATURAL_KEY) !== '0');
     setAvatarPref(readPref(AVATAR_KEY) !== '0');
@@ -363,6 +430,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     return () => {
       window.removeEventListener(PROFILE_EVENT, onProfileChange);
       window.removeEventListener(MEMORIES_EVENT, onMemoriesChange);
+      window.clearTimeout(hashCleanTimer);
       authSubscription?.data?.subscription?.unsubscribe();
       if (streamIntervalRef.current) {
         window.clearInterval(streamIntervalRef.current);
@@ -370,6 +438,72 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       }
     };
   }, []);
+
+  // Background Auto-Sync: automatically pushes changes & pulls on window refocus
+  useEffect(() => {
+    if (!user || !autoSync) return;
+
+    const triggerAutoSync = () => {
+      if (autoSyncDebounceRef.current) {
+        window.clearTimeout(autoSyncDebounceRef.current);
+      }
+      autoSyncDebounceRef.current = window.setTimeout(async () => {
+        if (!user) return;
+        setSyncStatus('syncing');
+        try {
+          const res = await syncUserData(user.id);
+          if (res.success) {
+            setSyncStatus('synced');
+            setLastSyncedAtState(Date.now());
+          } else {
+            setSyncStatus('error');
+          }
+        } catch {
+          setSyncStatus('error');
+        }
+      }, 1500);
+    };
+
+    const onDataMutation = () => {
+      triggerAutoSync();
+    };
+
+    const onWindowFocus = () => {
+      const now = Date.now();
+      // Throttle window focus sync to at most once per 30 seconds
+      if (now - lastFocusSyncRef.current < 30000) return;
+      lastFocusSyncRef.current = now;
+      void pullCloudUserData(user.id)
+        .then(() => {
+          setLastSyncedAtState(Date.now());
+          setSyncStatus('synced');
+        })
+        .catch(() => {
+          // Keep current status if offline
+        });
+    };
+
+    const onNetworkOnline = () => {
+      triggerAutoSync();
+    };
+
+    window.addEventListener(PROFILE_EVENT, onDataMutation);
+    window.addEventListener(MEMORIES_EVENT, onDataMutation);
+    window.addEventListener(SAVED_EVENT, onDataMutation);
+    window.addEventListener('focus', onWindowFocus);
+    window.addEventListener('online', onNetworkOnline);
+
+    return () => {
+      if (autoSyncDebounceRef.current) {
+        window.clearTimeout(autoSyncDebounceRef.current);
+      }
+      window.removeEventListener(PROFILE_EVENT, onDataMutation);
+      window.removeEventListener(MEMORIES_EVENT, onDataMutation);
+      window.removeEventListener(SAVED_EVENT, onDataMutation);
+      window.removeEventListener('focus', onWindowFocus);
+      window.removeEventListener('online', onNetworkOnline);
+    };
+  }, [user, autoSync]);
 
   // Auto-connect live video avatar when available
   useEffect(() => {
@@ -411,7 +545,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     speakNow();
   }
 
-  async function sendMessage(text: string): Promise<TalkTurn> {
+  async function sendMessage(text: string, onEarly?: (turn: TalkTurn) => void): Promise<TalkTurn> {
     const message = text.trim();
     if (!message) return { speak: '', pause: true };
     setPending('send');
@@ -458,6 +592,17 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           ...item,
           reply: { ...item.reply, [event.field]: item.reply[event.field] + event.text },
         }));
+      } else if (event.type === 'speech_start') {
+        const remoteUrl = ttsUrl(event.replyId);
+        onEarly?.({ speak: event.text, pause: false, language: event.language, remoteUrl });
+      } else if (event.type === 'memories') {
+        if (event.newMemories && event.newMemories.length > 0) {
+          const merged = mergeMemories(readMemories(), event.newMemories);
+          writeMemories(merged);
+          setMemories(merged);
+          const snippet = event.newMemories[0].fact.slice(0, 45);
+          flash(`Krishna remembered: "${snippet}…"`);
+        }
       } else if (event.type === 'reset') {
         wordQueueRef.current = [];
         currentWindowRef.current = '';
@@ -634,82 +779,21 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       {/* 2. Soft Vignette Overlay */}
       <div className="sanctuary-scrim" aria-hidden="true" />
 
-      {/* 3. Floating Top Quick Actions (Persona, Memories, Auth, History, Settings) */}
-      <div className="sanctuary-top-controls">
-        <div className="sanctuary-quick-actions">
-          {/* Persona / Devotee Pill */}
+      {/* 3. Conversation History Floating Action (only when messages exist) */}
+      {messages.length > 0 ? (
+        <div className="sanctuary-history-container">
           <button
             type="button"
-            className="sanctuary-circle-action sanctuary-persona-chip"
-            onClick={() => {
-              setProfileDraft(profile);
-              setPersonalizeOpen(true);
-            }}
-            title="Personalize Krishna Companion"
-            aria-label="Personalize Krishna Companion"
+            className="sanctuary-circle-action sanctuary-history-btn"
+            onClick={() => setHistoryOpen(true)}
+            title="Conversation History"
+            aria-label="View conversation history"
           >
-            <span className="persona-chip-icon">{PERSONA_DESCRIPTIONS[profile.persona ?? 'sakha'].icon}</span>
-            <span className="persona-chip-text">
-              {profile.preferredName ? profile.preferredName : PERSONA_DESCRIPTIONS[profile.persona ?? 'sakha'].label}
-            </span>
-          </button>
-
-          {/* Companion Memory Pill (like ChatGPT Manage Memory) */}
-          <button
-            type="button"
-            className="sanctuary-circle-action sanctuary-memory-chip"
-            onClick={() => setMemoriesOpen(true)}
-            title="What Krishna Remembers"
-            aria-label="What Krishna Remembers"
-          >
-            <span>🧠</span>
-            <span className="memory-chip-text">Memory</span>
-            {memories.filter((m) => m.active).length > 0 ? (
-              <span className="nav-count">{memories.filter((m) => m.active).length}</span>
-            ) : null}
-          </button>
-
-          {/* Sign In / Account Sync Pill */}
-          <button
-            type="button"
-            className={`sanctuary-circle-action sanctuary-auth-chip ${user ? 'sanctuary-auth-active' : ''}`}
-            onClick={() => {
-              setAuthNotice(null);
-              setAuthOpen(true);
-            }}
-            title={user ? `Signed in as ${user.email ?? 'Devotee'}` : 'Sign in to sync across devices'}
-            aria-label={user ? 'Account and Sync' : 'Sign In'}
-          >
-            <span>{user ? '👤' : '🔐'}</span>
-            <span className="auth-chip-text">
-              {user ? (user.email ? user.email.split('@')[0] : 'Account') : 'Sign In'}
-            </span>
-          </button>
-
-          {messages.length > 0 ? (
-            <button
-              type="button"
-              className="sanctuary-circle-action"
-              onClick={() => setHistoryOpen(true)}
-              title="Conversation History"
-              aria-label="View conversation history"
-            >
-              <span>History</span>
-              <span className="nav-count">{messages.length}</span>
-            </button>
-          ) : null}
-
-          <button
-            type="button"
-            className="sanctuary-circle-action sanctuary-circle-icon-only"
-            onClick={() => setSettingsOpen(true)}
-            title="Voice Settings"
-            aria-label="Voice settings"
-          >
-            <SlidersIcon />
+            <span>📜 History</span>
+            <span className="nav-count">{messages.length}</span>
           </button>
         </div>
-      </div>
+      ) : null}
 
       {/* 4. Center Dialog & Streaming Captions (No Prebuilt Box) */}
       <div className="sanctuary-dialog-area">
@@ -924,632 +1008,6 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
               <div ref={endRef} />
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {/* Settings Modal */}
-      {settingsOpen ? (
-        <div className="sanctuary-modal-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="sanctuary-settings-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-drag-indicator" aria-hidden="true">
-              <span className="drag-pill" />
-            </div>
-            <header className="sanctuary-sheet-header">
-              <span className="sanctuary-sheet-title">Companion Settings</span>
-              <button
-                type="button"
-                className="sanctuary-close-btn"
-                onClick={() => setSettingsOpen(false)}
-                aria-label="Close settings"
-              >
-                <CloseIcon />
-              </button>
-            </header>
-
-            <div className="sanctuary-settings-body">
-              <label className="settings-field">
-                <span className="settings-label">Microphone Language</span>
-                <select
-                  className="select"
-                  value={micLang}
-                  onChange={(e) => {
-                    setMicLang(e.target.value);
-                    writePref(MIC_LANG_KEY, e.target.value);
-                  }}
-                >
-                  {MIC_LANGS.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {service.tts ? (
-                <label className="toggle-row">
-                  <div className="toggle-label-group">
-                    <span>Natural Spoken Voice (ElevenLabs)</span>
-                    <span className="toggle-sub">Auto-deletes from cloud history after speaking. Turn off for 100% on-device private voice.</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={naturalPref}
-                    onChange={(e) => {
-                      setNaturalPref(e.target.checked);
-                      writePref(NATURAL_KEY, e.target.checked ? '1' : '0');
-                    }}
-                  />
-                </label>
-              ) : null}
-
-              {service.avatar ? (
-                <label className="toggle-row">
-                  <span>Interactive Video Face (Anam.ai)</span>
-                  <input
-                    type="checkbox"
-                    checked={avatarPref}
-                    onChange={(e) => {
-                      setAvatarPref(e.target.checked);
-                      writePref(AVATAR_KEY, e.target.checked ? '1' : '0');
-                    }}
-                  />
-                </label>
-              ) : null}
-
-              <label className="toggle-row">
-                <div className="toggle-label-group">
-                  <span>Hands-Free Voice Interruption</span>
-                  <span className="toggle-sub">Speak aloud to interrupt Krishna at any time (uses Echo Cancellation)</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={bargeInPref}
-                  onChange={(e) => {
-                    setBargeInPref(e.target.checked);
-                    writePref(BARGE_IN_PREF_KEY, e.target.checked ? '1' : '0');
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* 8. Personalize Krishna Companion Modal */}
-      {personalizeOpen ? (
-        <div className="sanctuary-modal-backdrop" onClick={() => setPersonalizeOpen(false)}>
-          <div className="sanctuary-modal-sheet sanctuary-personalize-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-drag-indicator" aria-hidden="true">
-              <span className="drag-pill" />
-            </div>
-            <header className="sanctuary-sheet-header">
-              <div className="personalize-title-group">
-                <span className="sanctuary-sheet-title">Personalize Your Companion</span>
-                <span className="personalize-subtitle">Choose how Krishna addresses and guides you</span>
-              </div>
-              <button
-                type="button"
-                className="sanctuary-close-btn"
-                onClick={() => setPersonalizeOpen(false)}
-                aria-label="Close personalization"
-              >
-                ✕
-              </button>
-            </header>
-
-            <div className="personalize-body">
-              {/* Devotee Preferred Name */}
-              <div className="personalize-field">
-                <label htmlFor="devotee-name" className="personalize-label">
-                  What should Krishna call you?
-                </label>
-                <input
-                  id="devotee-name"
-                  type="text"
-                  className="personalize-input"
-                  placeholder="e.g. Mani, Arjun, Radha..."
-                  maxLength={50}
-                  value={profileDraft.preferredName ?? ''}
-                  onChange={(e) => setProfileDraft((curr) => ({ ...curr, preferredName: e.target.value }))}
-                />
-              </div>
-
-              {/* Persona Selector */}
-              <div className="personalize-field">
-                <span className="personalize-label">How should Krishna speak to you?</span>
-                <div className="persona-cards-grid">
-                  {(Object.keys(PERSONA_DESCRIPTIONS) as CompanionPersona[]).map((pKey) => {
-                    const info = PERSONA_DESCRIPTIONS[pKey];
-                    const selected = (profileDraft.persona || 'sakha') === pKey;
-                    return (
-                      <button
-                        key={pKey}
-                        type="button"
-                        className={`persona-card ${selected ? 'persona-card-active' : ''}`}
-                        onClick={() => setProfileDraft((curr) => ({ ...curr, persona: pKey }))}
-                      >
-                        <div className="persona-card-top">
-                          <span className="persona-card-icon">{info.icon}</span>
-                          <span className="persona-card-name">{info.label}</span>
-                          {selected ? <span className="persona-check">✓</span> : null}
-                        </div>
-                        <span className="persona-card-title">{info.title}</span>
-                        <p className="persona-card-summary">{info.summary}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Life Context / Main Focus */}
-              <div className="personalize-field">
-                <label htmlFor="devotee-context" className="personalize-label">
-                  What is on your heart most these days? <span className="personalize-optional">(Optional)</span>
-                </label>
-                <div className="focus-quick-chips">
-                  {[
-                    'Peace of mind & calmness',
-                    'Career & decision making',
-                    'Overcoming doubt & fear',
-                    'Duty & family relationships',
-                    'Deepening devotion & surrender',
-                  ].map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      className={`focus-chip ${profileDraft.lifeContext === chip ? 'focus-chip-active' : ''}`}
-                      onClick={() =>
-                        setProfileDraft((curr) => ({
-                          ...curr,
-                          lifeContext: curr.lifeContext === chip ? '' : chip,
-                        }))
-                      }
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  id="devotee-context"
-                  type="text"
-                  className="personalize-input"
-                  placeholder="Or write your own life context..."
-                  maxLength={150}
-                  value={profileDraft.lifeContext ?? ''}
-                  onChange={(e) => setProfileDraft((curr) => ({ ...curr, lifeContext: e.target.value }))}
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="personalize-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setPersonalizeOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    writeProfile(profileDraft);
-                    setProfile(profileDraft);
-                    setPersonalizeOpen(false);
-                    flash('Companion preferences saved');
-                  }}
-                >
-                  Save Profile
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* 9. "What Krishna Remembers" Modal (Conversational Memory like ChatGPT) */}
-      {memoriesOpen ? (
-        <div className="sanctuary-modal-backdrop" onClick={() => setMemoriesOpen(false)}>
-          <div className="sanctuary-modal-sheet sanctuary-memories-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-drag-indicator" aria-hidden="true">
-              <span className="drag-pill" />
-            </div>
-            <header className="sanctuary-sheet-header">
-              <div className="personalize-title-group">
-                <span className="sanctuary-sheet-title">What Krishna Remembers</span>
-                <span className="personalize-subtitle">
-                  Krishna learns from your conversations like a dear companion. You can edit or delete anything.
-                </span>
-              </div>
-              <button
-                type="button"
-                className="sanctuary-close-btn"
-                onClick={() => setMemoriesOpen(false)}
-                aria-label="Close memories"
-              >
-                ✕
-              </button>
-            </header>
-
-            <div className="memories-body">
-              {/* Add Custom Memory Input */}
-              <div className="memory-add-box">
-                <span className="personalize-label">Add a detail you want Krishna to remember:</span>
-                <div className="memory-add-row">
-                  <select
-                    className="select memory-category-select"
-                    value={newMemoryCategory}
-                    onChange={(e) => setNewMemoryCategory(e.target.value as MemoryCategory)}
-                  >
-                    <option value="life_context">👤 Life & Work</option>
-                    <option value="struggle">🌧️ Dilemmas & Feelings</option>
-                    <option value="commitment">🪷 Spiritual Practice</option>
-                    <option value="milestone">🌟 Growth & Insight</option>
-                  </select>
-                  <input
-                    type="text"
-                    className="personalize-input memory-add-input"
-                    placeholder="e.g. Preparing for exams, Caring for parents..."
-                    value={newMemoryText}
-                    maxLength={140}
-                    onChange={(e) => setNewMemoryText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (newMemoryText.trim()) {
-                          const updated = mergeMemories(memories, [
-                            { fact: newMemoryText.trim(), category: newMemoryCategory },
-                          ]);
-                          writeMemories(updated);
-                          setMemories(updated);
-                          setNewMemoryText('');
-                          flash('Memory added');
-                        }
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary memory-add-btn"
-                    disabled={!newMemoryText.trim()}
-                    onClick={() => {
-                      if (newMemoryText.trim()) {
-                        const updated = mergeMemories(memories, [
-                          { fact: newMemoryText.trim(), category: newMemoryCategory },
-                        ]);
-                        writeMemories(updated);
-                        setMemories(updated);
-                        setNewMemoryText('');
-                        flash('Memory added');
-                      }
-                    }}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              {/* Memory List Header */}
-              <div className="memories-list-header">
-                <span className="memories-count-label">
-                  Active Memories ({memories.filter((m) => m.active).length})
-                </span>
-                {memories.length > 0 ? (
-                  <button
-                    type="button"
-                    className="memories-clear-btn"
-                    onClick={() => {
-                      if (window.confirm('Clear all memories Krishna has formed?')) {
-                        writeMemories([]);
-                        setMemories([]);
-                        flash('All memories cleared');
-                      }
-                    }}
-                  >
-                    Clear All
-                  </button>
-                ) : null}
-              </div>
-
-              {memories.length === 0 ? (
-                <div className="memories-empty">
-                  <span className="memories-empty-icon">🪷</span>
-                  <p className="memories-empty-title">Krishna hasn’t formed any memories yet</p>
-                  <p className="memories-empty-sub">
-                    As you share your thoughts, dilemmas, and feelings, Krishna will automatically remember what matters
-                    most to walk beside you like a true friend.
-                  </p>
-                </div>
-              ) : (
-                <div className="memories-list">
-                  {memories.map((mem) => {
-                    const catInfo = MEMORY_CATEGORIES[mem.category] ?? MEMORY_CATEGORIES.struggle;
-                    const isEditing = editingMemoryId === mem.id;
-
-                    return (
-                      <div key={mem.id} className="memory-card">
-                        <div className="memory-card-header">
-                          <span className="memory-badge">
-                            <span>{catInfo.icon}</span>
-                            <span>{catInfo.label}</span>
-                          </span>
-                          {mem.associatedVerse ? (
-                            <span className="memory-verse-tag">Gita {mem.associatedVerse}</span>
-                          ) : null}
-                          <div className="memory-card-actions">
-                            {isEditing ? (
-                              <button
-                                type="button"
-                                className="memory-btn-text"
-                                onClick={() => {
-                                  if (editingText.trim()) {
-                                    const next = memories.map((m) =>
-                                      m.id === mem.id ? { ...m, fact: editingText.trim() } : m,
-                                    );
-                                    writeMemories(next);
-                                    setMemories(next);
-                                    setEditingMemoryId(null);
-                                    flash('Memory updated');
-                                  }
-                                }}
-                              >
-                                Save
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="memory-btn-icon"
-                                title="Edit memory"
-                                onClick={() => {
-                                  setEditingMemoryId(mem.id);
-                                  setEditingText(mem.fact);
-                                }}
-                              >
-                                ✏️
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="memory-btn-icon memory-btn-delete"
-                              title="Delete memory"
-                              onClick={() => {
-                                const next = memories.filter((m) => m.id !== mem.id);
-                                writeMemories(next);
-                                setMemories(next);
-                                flash('Memory removed');
-                              }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            className="personalize-input memory-edit-input"
-                            value={editingText}
-                            maxLength={150}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const next = memories.map((m) =>
-                                  m.id === mem.id ? { ...m, fact: editingText.trim() } : m,
-                                );
-                                writeMemories(next);
-                                setMemories(next);
-                                setEditingMemoryId(null);
-                                flash('Memory updated');
-                              }
-                            }}
-                          />
-                        ) : (
-                          <p className="memory-fact-text">{mem.fact}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* 10. Sacred Sign In & Cloud Sync Modal */}
-      {authOpen ? (
-        <div className="sanctuary-modal-backdrop" onClick={() => setAuthOpen(false)}>
-          <div className="sanctuary-modal-sheet sanctuary-auth-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-drag-indicator" aria-hidden="true">
-              <span className="drag-pill" />
-            </div>
-            <header className="sanctuary-sheet-header">
-              <div className="personalize-title-group">
-                <span className="sanctuary-sheet-title">
-                  {user ? 'Your Account & Cloud Sync' : 'Walk with Krishna Across Your Devices'}
-                </span>
-                <span className="personalize-subtitle">
-                  {user
-                    ? 'Your personal memories and saved verses are backed up in the cloud'
-                    : 'Sign in to access your companion reflections and memories anywhere'}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="sanctuary-close-btn"
-                onClick={() => setAuthOpen(false)}
-                aria-label="Close account modal"
-              >
-                ✕
-              </button>
-            </header>
-
-            <div className="auth-body">
-              {authNotice ? (
-                <div className="auth-notice-banner" role="alert">
-                  {authNotice}
-                </div>
-              ) : null}
-
-              {user ? (
-                /* Signed-in Account Details */
-                <div className="auth-signed-in-card">
-                  <div className="auth-user-info">
-                    <span className="auth-avatar-circle">
-                      {user.email ? user.email.charAt(0).toUpperCase() : 'U'}
-                    </span>
-                    <div>
-                      <p className="auth-user-email">{user.email}</p>
-                      <span className="auth-sync-status">🟢 Cloud sync active</span>
-                    </div>
-                  </div>
-
-                  <div className="auth-sync-actions">
-                    <button
-                      type="button"
-                      className="btn btn-secondary auth-btn-sync"
-                      disabled={authPending}
-                      onClick={async () => {
-                        setAuthPending(true);
-                        try {
-                          await migrateGuestDataToCloud(user.id);
-                          await pullCloudUserData(user.id);
-                          flash('Data synced with cloud successfully');
-                        } catch {
-                          flash('Sync failed. Please check internet connection.');
-                        } finally {
-                          setAuthPending(false);
-                        }
-                      }}
-                    >
-                      {authPending ? 'Syncing…' : '🔄 Sync Now'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary auth-btn-signout"
-                      onClick={async () => {
-                        await signOut();
-                        setUser(null);
-                        setAuthOpen(false);
-                        flash('Signed out successfully');
-                      }}
-                    >
-                      Sign Out
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Sign In / Sign Up Form */
-                <div className="auth-signin-container">
-                  {/* Notice of Guest Data Preservation */}
-                  <div className="auth-preservation-pill">
-                    <span>🕊️</span>
-                    <span>Your guest memories, profile, and saved verses will be preserved upon sign in.</span>
-                  </div>
-
-                  {/* Google OAuth Button */}
-                  <button
-                    type="button"
-                    className="auth-google-btn"
-                    disabled={authPending}
-                    onClick={async () => {
-                      if (!isSupabaseConfigured()) {
-                        setAuthNotice('Supabase credentials needed in .env.local (schema is ready in supabase/schema.sql)');
-                        return;
-                      }
-                      setAuthPending(true);
-                      const { error } = await signInWithGoogle();
-                      if (error) {
-                        setAuthNotice(error.message);
-                        setAuthPending(false);
-                      }
-                    }}
-                  >
-                    <svg className="google-svg" viewBox="0 0 24 24" width="18" height="18">
-                      <path
-                        fill="#4285F4"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                      />
-                    </svg>
-                    <span>Continue with Google</span>
-                  </button>
-
-                  <div className="auth-divider">
-                    <span className="auth-divider-line" />
-                    <span className="auth-divider-text">or with email link</span>
-                    <span className="auth-divider-line" />
-                  </div>
-
-                  {/* Magic Link Form */}
-                  <form
-                    className="auth-email-form"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!isSupabaseConfigured()) {
-                        setAuthNotice('Supabase credentials needed in .env.local (schema is ready in supabase/schema.sql)');
-                        return;
-                      }
-                      if (!authEmail.trim()) return;
-                      setAuthPending(true);
-                      setAuthNotice(null);
-                      const { error } = await signInWithEmail(authEmail);
-                      setAuthPending(false);
-                      if (error) {
-                        setAuthNotice(error.message);
-                      } else {
-                        setAuthNotice(`Check your email inbox! A sacred sign-in link was sent to ${authEmail}.`);
-                        setAuthEmail('');
-                      }
-                    }}
-                  >
-                    <input
-                      type="email"
-                      className="personalize-input auth-email-input"
-                      placeholder="Enter your email address…"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="submit"
-                      className="btn btn-primary auth-submit-btn"
-                      disabled={authPending || !authEmail.trim()}
-                    >
-                      {authPending ? 'Sending…' : 'Send Sign-In Link'}
-                    </button>
-                  </form>
-
-                  {!isSupabaseConfigured() ? (
-                    <div className="auth-setup-banner">
-                      <p className="auth-setup-title">⚙️ Cloud Sync Ready</p>
-                      <p className="auth-setup-desc">
-                        To enable live Supabase authentication, simply add your <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to <code>.env.local</code>. Database schema is generated in <code>supabase/schema.sql</code>.
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Floating Flash Toast */}
-      {notice ? (
-        <div className="toast" role="status">
-          {notice}
         </div>
       ) : null}
     </main>

@@ -40,3 +40,28 @@ export function appendSession(sessionId: string, messages: SessionMessage[]): vo
   const next = [...getSession(sessionId), ...messages].slice(-MAX_MESSAGES);
   sessions.set(sessionId, next);
 }
+
+/** Registers early speech so the TTS route can begin fetching audio while the rest streams */
+export function registerEarlySpeech(
+  sessionId: string,
+  replyId: string,
+  speech: string,
+  language = 'en',
+): void {
+  const current = getSession(sessionId);
+  const existing = current.find((item) => item.role === 'assistant' && item.replyId === replyId);
+  if (existing) {
+    existing.speech = speech;
+    existing.language = language;
+  } else {
+    appendSession(sessionId, [
+      {
+        role: 'assistant',
+        content: speech,
+        language,
+        replyId,
+        speech,
+      },
+    ]);
+  }
+}

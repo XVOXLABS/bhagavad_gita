@@ -543,7 +543,7 @@ export type TalkTurn = { speak: string; pause: boolean; language?: string; remot
 export function useTalkMode(
   voice: ReturnType<typeof useKrishnaVoice>,
   dictation: Pick<Listener, 'start' | 'cancel'>,
-  send: (text: string) => Promise<TalkTurn>,
+  send: (text: string, onEarly?: (early: TalkTurn) => void) => Promise<TalkTurn>,
 ) {
   const [state, dispatch] = useReducer(nextTalkState, TALK_OFF);
   const live = useRef<TalkState>(state);
@@ -572,10 +572,22 @@ export function useTalkMode(
         return;
       }
       dispatch({ type: 'heard', text });
-      void sendRef.current(text).then((reply) => {
-        if (live.current.mode !== 'thinking') return;
-        dispatch({ type: 'replied', pause: reply.pause });
-        speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language, reply.remoteUrl);
+
+      let earlySpoken = false;
+      const onEarly = (early: TalkTurn) => {
+        if (live.current.mode !== 'thinking' || live.current.turn !== turn || earlySpoken) return;
+        earlySpoken = true;
+        dispatch({ type: 'replied', pause: early.pause });
+        speakRef.current('talk', early.speak, () => dispatch({ type: 'doneSpeaking' }), early.language, early.remoteUrl);
+      };
+
+      void sendRef.current(text, onEarly).then((reply) => {
+        if (live.current.turn !== turn) return;
+        if (!earlySpoken) {
+          if (live.current.mode !== 'thinking') return;
+          dispatch({ type: 'replied', pause: reply.pause });
+          speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language, reply.remoteUrl);
+        }
       });
     });
   }, [state.mode, state.turn]);

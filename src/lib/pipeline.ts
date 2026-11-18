@@ -1,6 +1,13 @@
 import { lookup, toDisplay, type DisplayVerse } from './corpus';
 import { embedQuery } from './embed';
-import { extractSituation, safeErrorMessage, selectVerses, writeConversation, writeReply } from './llm';
+import {
+  extractSituation,
+  extractSituationUnified,
+  safeErrorMessage,
+  selectVerses,
+  writeConversation,
+  writeReply,
+} from './llm';
 import { type CompanionMemory } from './memory';
 import { type DevoteeProfile } from './profile';
 import {
@@ -101,35 +108,56 @@ export async function respond(
 
   emit?.({ type: 'stage', stage: 'understanding' });
   let situation: Situation;
+  let earlyReplyText: string | null = null;
+  const liveConverse = streamer(emit, CONVERSE_KEYS, previousLanguage ?? 'en', [], message);
+
   try {
     calls += 1;
-    situation = parseSituation(await extractSituation(message, history, profile), message, previousLanguage);
+    const rawUnified = await extractSituationUnified(message, history, profile, memories, liveConverse?.onText);
+    situation = parseSituation(rawUnified, message, previousLanguage);
+    try {
+      const parsedObj = JSON.parse(rawUnified) as { reply?: string };
+      if (typeof parsedObj.reply === 'string' && parsedObj.reply.trim().length > 0) {
+        earlyReplyText = parsedObj.reply.trim();
+      }
+    } catch {
+      // JSON parse error handled gracefully
+    }
   } catch (error) {
-    console.info(JSON.stringify({ event: 'situation_failed', detail: safeErrorMessage(error) }));
-    situation = fallbackSituation(message, previousLanguage);
+    console.info(JSON.stringify({ event: 'unified_turn_fallback', detail: safeErrorMessage(error) }));
+    try {
+      calls += 1;
+      situation = parseSituation(await extractSituation(message, history, profile), message, previousLanguage);
+    } catch {
+      situation = fallbackSituation(message, previousLanguage);
+    }
   }
+
   const crisis = mentionsCrisis(message) || situation.crisis;
   if (crisis) situation = { ...situation, intent: 'problem', crisis: true };
   const language = situation.replyLanguage;
   const debug: ChatResult['debug'] = { situation, shortlist: [], mode: 'none', reason: '', dropped: [] };
-  console.info(JSON.stringify({ event: 'intent', intent: situation.intent, language, crisis }));
+  console.info(JSON.stringify({ event: 'intent', intent: situation.intent, language, crisis, singlePass: Boolean(earlyReplyText) }));
 
   // A language switch re-expresses the last guidance; it is not a new situation.
   const restate =
     situation.intent === 'language_request' && lastCitations(history).length > 0 && previousLanguage !== language;
 
   if (!needsVerse(situation.intent) && !restate) {
-    emit?.({ type: 'stage', stage: 'writing' });
-    const live = streamer(emit, CONVERSE_KEYS, language, [], message);
-    let text: string | null = null;
-    try {
-      calls += 1;
-      text = parseConversation(await writeConversation(message, history, situation, live?.onText, profile, memories));
-    } catch (error) {
-      console.info(JSON.stringify({ event: 'converse_failed', detail: safeErrorMessage(error) }));
+    let text = earlyReplyText;
+    // If single-pass didn't produce a conversational text, fall back to writeConversation
+    if (!text) {
+      emit?.({ type: 'stage', stage: 'writing' });
+      const live = streamer(emit, CONVERSE_KEYS, language, [], message);
+      try {
+        calls += 1;
+        text = parseConversation(await writeConversation(message, history, situation, live?.onText, profile, memories));
+      } catch (error) {
+        console.info(JSON.stringify({ event: 'converse_failed', detail: safeErrorMessage(error) }));
+      }
     }
-    if (!text || live?.gate.leaked || guidanceLeaks(text, language)) {
-      if (live?.gate.emitted) emit?.({ type: 'reset' });
+    if (!text || liveConverse?.gate.leaked || guidanceLeaks(text, language)) {
+      if (liveConverse?.gate.emitted) emit?.({ type: 'reset' });
       text = FALLBACK_CONVERSE;
     }
     text = stripEchoedInput(text, message, language);

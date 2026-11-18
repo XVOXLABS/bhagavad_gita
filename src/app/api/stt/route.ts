@@ -1,7 +1,8 @@
-import { ElevenError, elevenConfig, transcribe } from '@/lib/elevenlabs';
+import { ElevenError, elevenConfig } from '@/lib/elevenlabs';
 import { isLanguage } from '@/lib/language';
 import { safeErrorMessage } from '@/lib/llm';
 import { clientKey, limits } from '@/lib/rate-limit';
+import { isGroqSttAvailable, transcribeAudio } from '@/lib/transcribe';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -13,7 +14,8 @@ function fail(status: number, error: string): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  if (!elevenConfig().sttEnabled) return fail(503, 'disabled');
+  const sttActive = isGroqSttAvailable() || elevenConfig().sttEnabled;
+  if (!sttActive) return fail(503, 'disabled');
   if (!limits.stt(clientKey(request))) return fail(429, 'rate_limited');
 
   let form: FormData;
@@ -29,8 +31,8 @@ export async function POST(request: Request): Promise<Response> {
   const language = form.get('language');
 
   try {
-    const result = await transcribe(audio, isLanguage(language) ? language : undefined);
-    console.info(JSON.stringify({ event: 'stt', bytes: audio.size, language: result.language }));
+    const result = await transcribeAudio(audio, isLanguage(language) ? language : undefined);
+    console.info(JSON.stringify({ event: 'stt', bytes: audio.size, language: result.language, textLength: result.text.length }));
     return Response.json(result);
   } catch (error) {
     const kind = error instanceof ElevenError ? error.kind : 'failed';

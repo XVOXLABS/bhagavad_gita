@@ -2,9 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
+import type { User } from '@supabase/supabase-js';
+import { defaultProfile, readProfile, PROFILE_EVENT, type DevoteeProfile } from '@/lib/profile';
+import { getCurrentUser, getSupabase } from '@/lib/supabase';
 import { KrishnaMark } from './icons';
 import { useSavedVerses } from './saved';
+import { ProfileModal, getDevoteeDisplayName } from './profile-modal';
 
 const PLACES = [
   {
@@ -42,6 +46,30 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { saved } = useSavedVerses();
   const isCompanion = pathname === '/' || pathname.startsWith('/talk');
 
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<DevoteeProfile>(defaultProfile);
+
+  useEffect(() => {
+    setProfile(readProfile());
+    void getCurrentUser().then(setUser);
+
+    const sb = getSupabase();
+    const sub = sb?.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    const onProfileChange = () => setProfile(readProfile());
+    window.addEventListener(PROFILE_EVENT, onProfileChange);
+
+    return () => {
+      sub?.data?.subscription?.unsubscribe();
+      window.removeEventListener(PROFILE_EVENT, onProfileChange);
+    };
+  }, []);
+
+  const displayName = getDevoteeDisplayName(profile, user);
+
   return (
     <div className={`app ${isCompanion ? 'app-companion-view' : ''}`}>
       <header className={`topbar ${isCompanion ? 'topbar-companion' : ''}`}>
@@ -71,8 +99,23 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
+          {/* Devotee Profile Button directly INSIDE the navigation bar */}
+          <button
+            type="button"
+            className={`topbar-profile-btn ${user ? 'topbar-profile-active' : ''}`}
+            onClick={() => setProfileOpen(true)}
+            title={user ? `Signed in as ${displayName} (${user.email})` : 'Devotee Profile & Sign In'}
+            aria-label="Profile and Settings"
+          >
+            <span className="topbar-avatar-badge">
+              {user ? (displayName[0] || 'D').toUpperCase() : '👤'}
+            </span>
+            <span className="topbar-profile-name">{displayName}</span>
+          </button>
         </div>
       </header>
+      <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
       {children}
 
       {/* Modern Ergonomic Mobile Bottom Nav Bar (Active on Reading & Library screens) */}

@@ -2073,6 +2073,22 @@ a.brand {
   object-position: center 15%;
   z-index: 1;
   animation: divineBreathing 12s ease-in-out infinite alternate;
+  transition: filter 800ms ease, transform 800ms ease;
+}
+
+.krishna-face-fullscreen[data-state='connecting'] .krishna-face-portrait {
+  animation: divineConnectingPulse 2.8s ease-in-out infinite alternate;
+}
+
+@keyframes divineConnectingPulse {
+  0% {
+    transform: scale(1);
+    filter: brightness(1) saturate(1);
+  }
+  100% {
+    transform: scale(1.025);
+    filter: brightness(1.12) saturate(1.08) drop-shadow(0 0 30px rgba(226, 183, 92, 0.35));
+  }
 }
 
 .krishna-face-fullscreen .krishna-face-stage {
@@ -2082,7 +2098,7 @@ a.brand {
   height: 100%;
   z-index: 2;
   opacity: 0;
-  transition: opacity 800ms var(--ease-out);
+  transition: opacity 1000ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .krishna-face[data-live] .krishna-face-fullscreen .krishna-face-stage,
@@ -2099,6 +2115,60 @@ a.brand {
   height: 100%;
   object-fit: cover;
   object-position: center 15%;
+}
+
+/* Sacred Floating Loading Pill */
+.krishna-loading-pill {
+  position: absolute;
+  bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 20px;
+  background: rgba(10, 16, 44, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 183, 92, 0.45);
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 25px rgba(226, 183, 92, 0.3);
+  color: var(--gold-200);
+  font-size: var(--size-13);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  animation: loadingPillGlow 2.4s ease-in-out infinite alternate;
+}
+
+.loading-lotus-spin {
+  font-size: var(--size-15);
+  display: inline-block;
+  animation: lotusSpin 4s linear infinite;
+}
+
+.loading-text {
+  font-weight: 500;
+  color: var(--cream-100);
+}
+
+@keyframes lotusSpin {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.15); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes loadingPillGlow {
+  0% {
+    opacity: 0.85;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 15px rgba(226, 183, 92, 0.2);
+  }
+  100% {
+    opacity: 1;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 0 0 35px rgba(226, 183, 92, 0.45);
+  }
 }
 
 @keyframes divineBreathing {
@@ -2148,8 +2218,94 @@ a.brand {
   border-radius: var(--radius-full);
   margin: var(--space-3) auto 0;
   padding: var(--space-2) var(--space-4);
-  max-width: min(840px, calc(100vw - 2rem));
+  max-width: min(940px, calc(100vw - 2rem));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Nav Bar Profile Button */
+.topbar-profile-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 12px;
+  background: rgba(35, 52, 114, 0.4);
+  border: 1px solid rgba(226, 183, 92, 0.3);
+  border-radius: var(--radius-full);
+  color: var(--cream-100);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  font-family: var(--font-family-ui);
+  font-size: var(--size-13);
+  font-weight: 550;
+  margin-left: var(--space-2);
+  flex-shrink: 0;
+}
+
+.topbar-profile-btn:hover {
+  background: rgba(45, 68, 148, 0.65);
+  border-color: var(--gold-300);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.topbar-profile-active {
+  background: rgba(226, 183, 92, 0.16);
+  border-color: var(--gold-400);
+  color: var(--gold-100);
+}
+
+.topbar-avatar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--gold-400), var(--gold-600));
+  color: var(--indigo-950);
+  font-size: var(--size-12);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.topbar-profile-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .topbar-profile-name {
+    display: none;
+  }
+  .topbar-profile-btn {
+    padding: 4px;
+    margin-left: 0;
+  }
+}
+
+/* Floating Conversation History Button */
+.sanctuary-history-container {
+  position: absolute;
+  top: calc(var(--topbar-height) + 12px);
+  right: max(var(--space-4), env(safe-area-inset-right));
+  z-index: 35;
+}
+
+.sanctuary-history-btn {
+  background: rgba(14, 22, 54, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 183, 92, 0.3);
+  color: var(--cream-100);
+  padding: 6px 14px;
+  gap: var(--space-2);
+}
+
+.sanctuary-history-btn:hover {
+  background: rgba(24, 36, 84, 0.9);
+  border-color: var(--gold-300);
 }
 
 /* Floating Top Controls (Status, Quick Actions) */
@@ -3361,17 +3517,94 @@ a.brand {
 .auth-chip-text {
   font-weight: 500;
   font-size: var(--size-13);
-  max-width: 110px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Auth Modal Sheet */
+/* Auth / Profile Modal Sheet */
 .sanctuary-auth-sheet {
-  max-width: 500px;
+  max-width: 650px;
   max-height: 85vh;
   overflow-y: auto;
+}
+
+.profile-modal-user-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(20, 31, 71, 0.6);
+  border: 1px solid rgba(226, 183, 92, 0.25);
+  border-radius: var(--radius-md);
+}
+
+.profile-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.profile-header-name {
+  margin: 0;
+  font-size: var(--size-16);
+  font-weight: 600;
+  color: var(--gold-100);
+}
+
+.profile-header-sub {
+  font-size: var(--size-12);
+  color: var(--text-muted);
+}
+
+.profile-tabs-bar {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid rgba(226, 183, 92, 0.2);
+  padding-bottom: var(--space-2);
+  overflow-x: auto;
+}
+
+.profile-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--cream-200);
+  font-size: var(--size-13);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--duration-fast);
+}
+
+.profile-tab-btn:hover {
+  background: rgba(226, 183, 92, 0.1);
+  color: var(--gold-100);
+}
+
+.profile-tab-btn.profile-tab-active {
+  background: rgba(226, 183, 92, 0.2);
+  border-color: rgba(226, 183, 92, 0.4);
+  color: var(--gold-200);
+  font-weight: 600;
+}
+
+.profile-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--size-11);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--gold-400);
+  color: #0b112c;
+  font-weight: 700;
 }
 
 .auth-body {
@@ -3431,6 +3664,25 @@ a.brand {
   margin: 2px 0 0;
   font-size: var(--size-12);
   color: var(--text-muted);
+}
+
+.auth-autosync-row {
+  padding: var(--space-3);
+  background: rgba(226, 183, 92, 0.06);
+  border: 1px solid rgba(226, 183, 92, 0.16);
+  border-radius: var(--radius-md);
+  margin-top: 2px;
+}
+
+.auth-autosync-row .switch-title {
+  font-size: var(--size-14);
+  color: var(--cream-100);
+}
+
+.auth-autosync-row .switch-sub {
+  font-size: var(--size-12);
+  color: rgba(245, 237, 216, 0.65);
+  margin-top: 2px;
 }
 
 .auth-signed-in-actions {
@@ -4360,6 +4612,70 @@ a.brand {
     font-size: 15px !important;
   }
 }
+
+/* Sacred Ambient Sound Chip in Top HUD */
+.sanctuary-ambient-chip {
+  gap: var(--space-2);
+  padding: 6px 14px;
+  background: rgba(35, 52, 114, 0.4);
+  border: 1px solid rgba(226, 183, 92, 0.25);
+  color: var(--cream-100);
+}
+
+.sanctuary-ambient-chip:hover {
+  background: rgba(45, 68, 148, 0.6);
+  border-color: var(--gold-300);
+  transform: translateY(-1px);
+}
+
+.sanctuary-ambient-active {
+  background: rgba(226, 183, 92, 0.18);
+  border-color: var(--gold-400);
+  color: var(--gold-200);
+  box-shadow: 0 0 10px rgba(226, 183, 92, 0.2);
+}
+
+.ambient-chip-text {
+  font-weight: 500;
+  font-size: var(--size-13);
+}
+
+/* Personalize Ambient Row & Slider */
+.personalize-ambient-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.personalize-hint {
+  font-size: var(--size-12);
+  color: var(--cream-200);
+  margin-top: 2px;
+}
+
+.personalize-volume-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.volume-label {
+  font-size: var(--size-12);
+  color: var(--gold-200);
+  min-width: 90px;
+}
+
+.ambient-slider {
+  flex: 1;
+  accent-color: var(--gold-400);
+  cursor: pointer;
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(226, 183, 92, 0.2);
+}
+
 
 
 

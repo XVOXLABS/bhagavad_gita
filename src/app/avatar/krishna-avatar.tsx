@@ -42,9 +42,10 @@ export function KrishnaAvatar({ size = 'fullscreen', label }: { size?: 'large' |
         <div ref={stage} className="krishna-face-stage" />
       </div>
       {state === 'connecting' ? (
-        <p className="krishna-face-note" role="status">
-          {label ?? 'Krishna is arriving…'}
-        </p>
+        <div className="krishna-loading-pill" role="status">
+          <span className="loading-lotus-spin">🪷</span>
+          <span className="loading-text">{label ?? 'Krishna is arriving…'}</span>
+        </div>
       ) : null}
     </div>
   );

@@ -6,7 +6,7 @@ import { type DevoteeProfile } from '@/lib/profile';
 import { speakableText } from '@/lib/speech';
 import { respond, type ChatResult } from '@/lib/pipeline';
 import { CRISIS_MESSAGE, HELPLINES, mentionsCrisis } from '@/lib/safety';
-import { appendSession, clearSession, getSession } from '@/lib/session';
+import { appendSession, clearSession, getSession, registerEarlySpeech } from '@/lib/session';
 import type { PipelineEvent } from '@/lib/stream-reply';
 import { replyText, type Reply } from '@/lib/verify';
 
@@ -92,14 +92,14 @@ function unavailable(crisis: boolean, calls: number): FinishedTurn {
 }
 
 /** Saves the turn (with the text the TTS route may speak) and builds the response body. */
-function finish(sessionId: string, message: string, result: ChatResult): FinishedTurn {
+function finish(sessionId: string, message: string, result: ChatResult, existingReplyId?: string): FinishedTurn {
   if (result.debug.dropped.length > 0) {
     console.info(JSON.stringify({ event: 'citation_rejected', dropped: result.debug.dropped, status: result.status }));
   }
   if (result.status === 'unavailable') return unavailable(result.crisis, result.calls);
 
   const guidance = replyText(result.reply);
-  const replyId = randomUUID();
+  const replyId = existingReplyId || randomUUID();
   appendSession(sessionId, [
     { role: 'user', content: message },
     {
@@ -129,7 +129,7 @@ function failed(message: string, error: unknown) {
   return unavailable(mentionsCrisis(message), 0);
 }
 
-/** One JSON event per line: stage, verses, delta, reset, then a final "done" carrying the full reply. */
+/** One JSON event per line: stage, verses, delta, reset, speech_start, done, memories */
 function streamReply(
   request: Request,
   sessionId: string,
@@ -138,6 +138,10 @@ function streamReply(
   memories?: CompanionMemory[],
 ): Response {
   const encoder = new TextEncoder();
+  const replyId = randomUUID();
+  let accumulatedText = '';
+  let earlySpeechEmitted = false;
+
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       let open = true;
@@ -149,31 +153,54 @@ function streamReply(
           open = false;
         }
       };
-      const emit = (event: PipelineEvent) =>
-        send(event.type === 'verses' ? { ...event, crisis: crisisBlock(event.crisis) } : event);
 
-      let done;
-      try {
-        // The turn is saved even if the reader has gone, so the session history stays complete.
-        const result = await respond(message, getSession(sessionId), emit, profile, memories);
-        done = finish(sessionId, message, result);
-        if (done.status !== 'unavailable') {
-          const verseKey = result.verses.length > 0 ? `${result.verses[0].chapter}.${result.verses[0].verse}` : undefined;
-          const newMemories = await extractMemories(message, done.guidance, memories, verseKey);
-          if (newMemories.length > 0) {
-            done = { ...done, newMemories };
+      const emit = (event: PipelineEvent) => {
+        send(event.type === 'verses' ? { ...event, crisis: crisisBlock(event.crisis) } : event);
+        if (event.type === 'delta' && !earlySpeechEmitted) {
+          accumulatedText += event.text;
+          if (/[.!?।॥]\s*/.test(accumulatedText) || accumulatedText.trim().split(/\s+/).length >= 6) {
+            earlySpeechEmitted = true;
+            registerEarlySpeech(sessionId, replyId, accumulatedText.trim(), profile?.language ?? 'en');
+            send({
+              type: 'speech_start',
+              replyId,
+              text: accumulatedText.trim(),
+              language: profile?.language ?? 'en',
+            });
           }
         }
+      };
+
+      let done: FinishedTurn;
+      try {
+        const result = await respond(message, getSession(sessionId), emit, profile, memories);
+        done = finish(sessionId, message, result, replyId);
       } catch (error) {
         done = failed(message, error);
       }
+
+      // Send done immediately so the client & TTS pipeline are not blocked
       send({ type: 'done', ...done });
+
+      // Run companion memory extraction asynchronously without delaying voice response
+      if (done.status !== 'unavailable') {
+        const verseKey = done.verses && done.verses.length > 0 ? `${done.verses[0].chapter}.${done.verses[0].verse}` : undefined;
+        try {
+          const newMemories = await extractMemories(message, done.guidance, memories, verseKey);
+          if (newMemories.length > 0) {
+            send({ type: 'memories', newMemories });
+          }
+        } catch {
+          // Non-critical background task
+        }
+      }
+
       if (open) {
         open = false;
         try {
           controller.close();
         } catch {
-          // Already closed by a disconnect.
+          // Already closed by client disconnect
         }
       }
     },

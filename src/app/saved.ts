@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
 
-const SAVED_KEY = 'gita.saved';
-const SAVED_EVENT = 'gita-saved';
+export const SAVED_KEY = 'gita.saved';
+export const SAVED_EVENT = 'gita-saved';
 const MAX_SAVED = 200;
 
 export function verseRef(verse: Pick<DisplayVerse, 'chapter' | 'verse'>): string {

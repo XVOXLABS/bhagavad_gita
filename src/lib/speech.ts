@@ -107,7 +107,7 @@ export type VadState = { startedAt: number; heardSpeech: boolean; lastVoiceAt: n
 export const VAD = {
   /** RMS level (0-1) above which the frame counts as speech. */
   speechLevel: 0.035,
-  silenceAfterSpeechMs: 1200,
+  silenceAfterSpeechMs: 1000,
   noSpeechMs: 7000,
   maxMs: 60_000,
 };

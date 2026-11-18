@@ -17,6 +17,23 @@ export function getSupabase(): SupabaseClient | null {
   return client;
 }
 
+/**
+ * Automatically cleans sensitive OAuth tokens (access_token, refresh_token) or OAuth errors
+ * from the browser address bar hash fragment once consumed, leaving a clean URL.
+ */
+export function cleanAuthUrlHash(): void {
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash;
+  if (
+    hash &&
+    (hash.includes('access_token') ||
+      hash.includes('refresh_token') ||
+      hash.includes('error='))
+  ) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+}
+
 /** Initiates Google OAuth Sign-In. Redirects to Google authentication screen. */
 export async function signInWithGoogle(): Promise<{ error: Error | null }> {
   const sb = getSupabase();
