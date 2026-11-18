@@ -12,15 +12,6 @@ import {
   PROFILE_EVENT,
 } from '@/lib/profile';
 import {
-  readMemories,
-  writeMemories,
-  mergeMemories,
-  MEMORY_CATEGORIES,
-  MEMORIES_EVENT,
-  type CompanionMemory,
-  type MemoryCategory,
-} from '@/lib/memory';
-import {
   getCurrentUser,
   getSupabase,
   isSupabaseConfigured,
@@ -77,17 +68,12 @@ export function ProfileModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'persona' | 'memories' | 'account';
+  initialTab?: 'persona' | 'account';
 }) {
-  const [profileTab, setProfileTab] = useState<'persona' | 'memories' | 'account'>(initialTab);
+  const [profileTab, setProfileTab] = useState<'persona' | 'account'>(initialTab);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<DevoteeProfile>(defaultProfile);
   const [profileDraft, setProfileDraft] = useState<DevoteeProfile>(defaultProfile);
-  const [memories, setMemories] = useState<CompanionMemory[]>([]);
-  const [newMemoryText, setNewMemoryText] = useState('');
-  const [newMemoryCategory, setNewMemoryCategory] = useState<MemoryCategory>('life_context');
-  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
   const [micLang, setMicLang] = useState('en-IN');
   const [authEmail, setAuthEmail] = useState('');
   const [authPending, setAuthPending] = useState(false);
@@ -110,7 +96,6 @@ export function ProfileModal({
     const loadedProfile = readProfile();
     setProfile(loadedProfile);
     setProfileDraft(loadedProfile);
-    setMemories(readMemories());
 
     const savedLang = readPref(MIC_LANG_KEY);
     if (savedLang && MIC_LANGS.some((item) => item.code === savedLang)) {
@@ -131,19 +116,29 @@ export function ProfileModal({
       setProfile(p);
       setProfileDraft(p);
     };
-    const onMemoriesChange = () => {
-      setMemories(readMemories());
-    };
 
     window.addEventListener(PROFILE_EVENT, onProfileChange);
-    window.addEventListener(MEMORIES_EVENT, onMemoriesChange);
 
     return () => {
       sub?.data.subscription.unsubscribe();
       window.removeEventListener(PROFILE_EVENT, onProfileChange);
-      window.removeEventListener(MEMORIES_EVENT, onMemoriesChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (isOpen) {
+        document.body.classList.add('modal-drawer-open');
+      } else {
+        document.body.classList.remove('modal-drawer-open');
+      }
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('modal-drawer-open');
+      }
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -159,7 +154,7 @@ export function ProfileModal({
           <div className="personalize-title-group">
             <span className="sanctuary-sheet-title">Devotee Profile & Companion</span>
             <span className="personalize-subtitle">
-              Customize your name, Krishna&apos;s persona, memories, and cloud sync
+              Customize your name, Krishna&apos;s persona, and cloud sync
             </span>
           </div>
           <button
@@ -211,7 +206,7 @@ export function ProfileModal({
             </div>
           </div>
 
-          {/* Tabs: Sakha Persona | Memories | Account & Sync */}
+          {/* Tabs: Sakha Persona | Account & Sync */}
           <div className="profile-tabs-bar" role="tablist">
             <button
               type="button"
@@ -222,19 +217,6 @@ export function ProfileModal({
             >
               <span>{PERSONA_DESCRIPTIONS[profileDraft.persona || 'sakha'].icon}</span>
               <span>Companion ({PERSONA_DESCRIPTIONS[profileDraft.persona || 'sakha'].label})</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={profileTab === 'memories'}
-              className={`profile-tab-btn ${profileTab === 'memories' ? 'profile-tab-active' : ''}`}
-              onClick={() => setProfileTab('memories')}
-            >
-              <span>🧠</span>
-              <span>Memories</span>
-              {memories.filter((m) => m.active).length > 0 ? (
-                <span className="profile-tab-badge">{memories.filter((m) => m.active).length}</span>
-              ) : null}
             </button>
             <button
               type="button"
@@ -372,192 +354,7 @@ export function ProfileModal({
             </div>
           )}
 
-          {/* TAB 2: WHAT KRISHNA REMEMBERS */}
-          {profileTab === 'memories' && (
-            <div className="memories-body" style={{ padding: 0 }}>
-              {/* Add Custom Memory Input */}
-              <div className="memory-add-box">
-                <span className="personalize-label">Add a detail you want Krishna to remember:</span>
-                <div className="memory-add-row">
-                  <select
-                    className="select memory-category-select"
-                    value={newMemoryCategory}
-                    onChange={(e) => setNewMemoryCategory(e.target.value as MemoryCategory)}
-                  >
-                    <option value="life_context">👤 Life & Work</option>
-                    <option value="struggle">🌧️ Dilemmas & Feelings</option>
-                    <option value="commitment">🪷 Spiritual Practice</option>
-                    <option value="milestone">🌟 Growth & Insight</option>
-                  </select>
-                  <input
-                    type="text"
-                    className="personalize-input memory-add-input"
-                    placeholder="e.g. Preparing for exams, Caring for parents..."
-                    value={newMemoryText}
-                    maxLength={140}
-                    onChange={(e) => setNewMemoryText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (newMemoryText.trim()) {
-                          const updated = mergeMemories(memories, [
-                            { fact: newMemoryText.trim(), category: newMemoryCategory },
-                          ]);
-                          writeMemories(updated);
-                          setMemories(updated);
-                          setNewMemoryText('');
-                          flash('Memory added');
-                        }
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary memory-add-btn"
-                    disabled={!newMemoryText.trim()}
-                    onClick={() => {
-                      if (newMemoryText.trim()) {
-                        const updated = mergeMemories(memories, [
-                          { fact: newMemoryText.trim(), category: newMemoryCategory },
-                        ]);
-                        writeMemories(updated);
-                        setMemories(updated);
-                        setNewMemoryText('');
-                        flash('Memory added');
-                      }
-                    }}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              {/* Memory List Header */}
-              <div className="memories-list-header">
-                <span className="memories-count-label">
-                  Active Memories ({memories.filter((m) => m.active).length})
-                </span>
-                {memories.length > 0 ? (
-                  <button
-                    type="button"
-                    className="memories-clear-btn"
-                    onClick={() => {
-                      if (window.confirm('Clear all memories Krishna has formed?')) {
-                        writeMemories([]);
-                        setMemories([]);
-                        flash('All memories cleared');
-                      }
-                    }}
-                  >
-                    Clear All
-                  </button>
-                ) : null}
-              </div>
-
-              {memories.length === 0 ? (
-                <div className="memories-empty">
-                  <span className="memories-empty-icon">🪷</span>
-                  <p className="memories-empty-title">Krishna hasn’t formed any memories yet</p>
-                  <p className="memories-empty-sub">
-                    As you share your thoughts, dilemmas, and feelings, Krishna will automatically remember what matters
-                    most to walk beside you like a true friend.
-                  </p>
-                </div>
-              ) : (
-                <div className="memories-list">
-                  {memories.map((mem) => {
-                    const catInfo = MEMORY_CATEGORIES[mem.category] ?? MEMORY_CATEGORIES.struggle;
-                    const isEditing = editingMemoryId === mem.id;
-
-                    return (
-                      <div key={mem.id} className="memory-card">
-                        <div className="memory-card-header">
-                          <span className="memory-badge">
-                            <span>{catInfo.icon}</span>
-                            <span>{catInfo.label}</span>
-                          </span>
-                          {mem.associatedVerse ? (
-                            <span className="memory-verse-tag">Gita {mem.associatedVerse}</span>
-                          ) : null}
-                          <div className="memory-card-actions">
-                            {isEditing ? (
-                              <button
-                                type="button"
-                                className="memory-btn-text"
-                                onClick={() => {
-                                  if (editingText.trim()) {
-                                    const next = memories.map((m) =>
-                                      m.id === mem.id ? { ...m, fact: editingText.trim() } : m,
-                                    );
-                                    writeMemories(next);
-                                    setMemories(next);
-                                    setEditingMemoryId(null);
-                                    flash('Memory updated');
-                                  }
-                                }}
-                              >
-                                Save
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="memory-btn-icon"
-                                title="Edit memory"
-                                onClick={() => {
-                                  setEditingMemoryId(mem.id);
-                                  setEditingText(mem.fact);
-                                }}
-                              >
-                                ✏️
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="memory-btn-icon memory-btn-delete"
-                              title="Delete memory"
-                              onClick={() => {
-                                const next = memories.filter((m) => m.id !== mem.id);
-                                writeMemories(next);
-                                setMemories(next);
-                                flash('Memory removed');
-                              }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            className="personalize-input memory-edit-input"
-                            value={editingText}
-                            maxLength={150}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const next = memories.map((m) =>
-                                  m.id === mem.id ? { ...m, fact: editingText.trim() } : m,
-                                );
-                                writeMemories(next);
-                                setMemories(next);
-                                setEditingMemoryId(null);
-                                flash('Memory updated');
-                              }
-                            }}
-                          />
-                        ) : (
-                          <p className="memory-fact-text">{mem.fact}</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 3: ACCOUNT & CLOUD SYNC */}
+          {/* TAB 2: ACCOUNT & CLOUD SYNC */}
           {profileTab === 'account' && (
             <>
               {user ? (
@@ -567,7 +364,7 @@ export function ProfileModal({
                     <div>
                       <span className="switch-title">Background Auto-Sync</span>
                       <span className="switch-sub">
-                        Seamlessly backs up memories, profile & saved verses as you reflect
+                        Seamlessly backs up your profile, reflections & saved verses
                       </span>
                     </div>
                     <input
@@ -616,7 +413,7 @@ export function ProfileModal({
                 <div className="auth-signin-container">
                   <div className="auth-preservation-pill">
                     <span>🕊️</span>
-                    <span>Your guest memories, profile, and saved verses will be preserved upon sign in.</span>
+                    <span>Your guest profile, preferences, and saved verses will be preserved upon sign in.</span>
                   </div>
 
                   {/* Google OAuth Button */}

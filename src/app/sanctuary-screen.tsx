@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { DisplayVerse } from '@/lib/corpus';
 import { KRISHNA_GREETING, generatePersonalizedGreeting } from '@/lib/greeting';
 import {
@@ -42,6 +42,16 @@ import {
   formatLastSynced,
 } from '@/lib/sync';
 import { speakableText } from '@/lib/speech';
+import {
+  type DialogueMessage,
+  type DialogueSession,
+  loadDialogues,
+  saveDialogue,
+  deleteDialogue,
+  generateDialogueTitle,
+  formatDialogueDate,
+  DIALOGUES_EVENT,
+} from '@/lib/dialogue-history';
 import { useBargeIn, BARGE_IN_PREF_KEY } from './use-barge-in';
 import { avatarEngine } from './avatar/anam-engine';
 import { KrishnaAvatar, useAvatarState } from './avatar/krishna-avatar';
@@ -93,7 +103,7 @@ type ChatResponse = {
 };
 
 type UiMessage =
-  | { id: string; role: 'user'; text: string }
+  | { id: string; role: 'user'; text: string; timestamp?: number }
   | {
     id: string;
     role: 'assistant';
@@ -104,8 +114,9 @@ type UiMessage =
     status: 'answered' | 'no_strong_match' | 'conversation';
     replyId?: string;
     streaming?: boolean;
+    timestamp?: number;
   }
-  | { id: string; role: 'error'; text: string; crisis: Crisis };
+  | { id: string; role: 'error'; text: string; crisis: Crisis; timestamp?: number };
 
 const UNAVAILABLE_TEXT = 'Let us pause for a moment. Please speak with me again.';
 const UNAVAILABLE_SPOKEN = 'Let us pause for a moment. Please speak with me again in a little while.';
@@ -178,9 +189,16 @@ function getDevoteeDisplayName(profile: DevoteeProfile, user: User | null): stri
 }
 
 export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
-  const [sessionId] = useState(() => uid());
+  const [sessionId, setSessionId] = useState(() => uid());
+  const sessionCreatedAtRef = useRef<number>(Date.now());
   const [callActive, setCallActive] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyView, setHistoryView] = useState<'directory' | 'transcript'>('directory');
+  const [selectedDialogue, setSelectedDialogue] = useState<DialogueSession | null>(null);
+  const [pastDialogues, setPastDialogues] = useState<DialogueSession[]>(() => {
+    if (typeof window === 'undefined') return [];
+    return loadDialogues();
+  });
   const [user, setUser] = useState<User | null>(null);
   const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
@@ -495,6 +513,178 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     }
   }, [draft]);
 
+  // Sync past dialogues from local storage whenever dialogues change
+  useEffect(() => {
+    const refresh = () => {
+      const all = loadDialogues();
+      setPastDialogues(all.filter((s) => s.id !== sessionId));
+    };
+    refresh();
+    window.addEventListener(DIALOGUES_EVENT, refresh);
+    return () => window.removeEventListener(DIALOGUES_EVENT, refresh);
+  }, [sessionId]);
+
+  // Listen for global navbar History open trigger
+  useEffect(() => {
+    const onOpenGlobalHistory = () => {
+      if (messages.length > 0 && pastDialogues.length === 0) {
+        setSelectedDialogue(null);
+        setHistoryView('transcript');
+      } else {
+        setHistoryView('directory');
+      }
+      setHistoryOpen(true);
+    };
+    window.addEventListener('gita-open-history', onOpenGlobalHistory);
+    return () => window.removeEventListener('gita-open-history', onOpenGlobalHistory);
+  }, [messages.length, pastDialogues.length]);
+
+  // Handle URL param ?history=1 (e.g. navigated from another page's navbar)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('history') === '1') {
+        setHistoryView('directory');
+        setHistoryOpen(true);
+        url.searchParams.delete('history');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      }
+    }
+  }, []);
+
+  // Prevent topbar overlap by hiding it when modal or drawer is open
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (historyOpen || verseDrawer) {
+        document.body.classList.add('modal-drawer-open');
+      } else {
+        document.body.classList.remove('modal-drawer-open');
+      }
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('modal-drawer-open');
+      }
+    };
+  }, [historyOpen, verseDrawer]);
+
+  // Auto-persist active sanctuary dialogue to local storage
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const nonStreaming = messages.filter((m) => !('streaming' in m && m.streaming));
+    if (nonStreaming.length === 0) return;
+
+    const dialogueMessages: DialogueMessage[] = nonStreaming.map((m) => {
+      if (m.role === 'user') {
+        return {
+          id: m.id,
+          role: 'user',
+          text: m.text,
+          timestamp: m.timestamp || Date.now(),
+        };
+      }
+      if (m.role === 'assistant') {
+        return {
+          id: m.id,
+          role: 'assistant',
+          text: [m.reply.acknowledge, m.reply.connection, m.reply.step].filter(Boolean).join('\n\n'),
+          reply: m.reply,
+          verses: m.verses,
+          language: m.language,
+          timestamp: m.timestamp || Date.now(),
+        };
+      }
+      return {
+        id: m.id,
+        role: 'error',
+        text: m.text,
+        timestamp: m.timestamp || Date.now(),
+      };
+    });
+
+    const citedVerses: string[] = [];
+    nonStreaming.forEach((m) => {
+      if (m.role === 'assistant' && m.verses) {
+        m.verses.forEach((v) => {
+          const ref = `${v.chapter}.${v.verse}`;
+          if (!citedVerses.includes(ref)) citedVerses.push(ref);
+        });
+      }
+    });
+
+    const session: DialogueSession = {
+      id: sessionId,
+      title: generateDialogueTitle(dialogueMessages),
+      createdAt: sessionCreatedAtRef.current,
+      updatedAt: Date.now(),
+      messages: dialogueMessages,
+      citedVerses,
+    };
+
+    saveDialogue(session);
+  }, [messages, sessionId]);
+
+  const activeCitedVerses = useMemo(() => {
+    const list: string[] = [];
+    messages.forEach((m) => {
+      if (m.role === 'assistant' && m.verses) {
+        m.verses.forEach((v) => {
+          const ref = `${v.chapter}.${v.verse}`;
+          if (!list.includes(ref)) list.push(ref);
+        });
+      }
+    });
+    return list;
+  }, [messages]);
+
+  function startNewDialogue() {
+    voice.stop();
+    talk.end();
+    setMessages([]);
+    const newId = uid();
+    setSessionId(newId);
+    sessionCreatedAtRef.current = Date.now();
+    setSelectedDialogue(null);
+    setHistoryView('directory');
+    setCaption('');
+    setIsStreaming(false);
+    setDraft('');
+    setHistoryOpen(false);
+    flash('New dialogue started in the sanctuary');
+  }
+
+  function handleDeleteDialogue(id: string) {
+    deleteDialogue(id);
+    if (selectedDialogue?.id === id) {
+      setSelectedDialogue(null);
+      setHistoryView('directory');
+    }
+    flash('Dialogue removed from history');
+  }
+
+  function handleReplayVoice(msgId: string, text: string, language = 'en', replyId?: string) {
+    if (voice.speakingId === msgId) {
+      voice.stop();
+      return;
+    }
+    const remoteUrl = replyId ? ttsUrl(replyId) : undefined;
+    voice.speak(msgId, text, undefined, language, remoteUrl);
+  }
+
+  function handleCopyKrishnaText(text: string) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => flash("Krishna's words copied to clipboard"))
+        .catch(() => flash('Could not copy to clipboard'));
+    }
+  }
+
+  function formatMessageTime(timestamp?: number): string {
+    if (!timestamp) return '';
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -529,7 +719,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     currentWindowRef.current = '';
     setCaption('');
     setIsStreaming(false);
-    setMessages((curr) => [...curr, { id: uid(), role: 'user', text: message }]);
+    setMessages((curr) => [...curr, { id: uid(), role: 'user', text: message, timestamp: Date.now() }]);
 
     const id = uid();
     const withoutDraft = (curr: UiMessage[]) => curr.filter((item) => item.id !== id);
@@ -546,6 +736,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
             language: 'en',
             status: 'answered' as const,
             streaming: true,
+            timestamp: Date.now(),
           };
           return [...curr, change(empty)];
         }
@@ -597,7 +788,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
         const fallbackText = data?.error || data?.guidance || UNAVAILABLE_TEXT;
         setMessages((curr) => [
           ...withoutDraft(curr),
-          { id: uid(), role: 'error', text: fallbackText, crisis },
+          { id: uid(), role: 'error', text: fallbackText, crisis, timestamp: Date.now() },
         ]);
         pushWordsToStream(crisis ? crisis.message : UNAVAILABLE_TEXT, true);
         return { speak: crisis ? `${crisis.message} ${UNAVAILABLE_SPOKEN}` : UNAVAILABLE_SPOKEN, pause: true };
@@ -611,7 +802,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
       setMessages((curr) => [
         ...withoutDraft(curr),
-        { id, role: 'assistant', reply, verses: data.verses ?? [], crisis, language, status, replyId },
+        { id, role: 'assistant', reply, verses: data.verses ?? [], crisis, language, status, replyId, timestamp: Date.now() },
       ]);
 
       const spoken = speakableText(reply, crisis?.message, language);
@@ -621,7 +812,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       const remoteUrl = ttsUrl(replyId);
       return { speak: spoken, pause: Boolean(crisis), language, remoteUrl };
     } catch {
-      setMessages((curr) => [...withoutDraft(curr), { id: uid(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null }]);
+      setMessages((curr) => [...withoutDraft(curr), { id: uid(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null, timestamp: Date.now() }]);
       pushWordsToStream(UNAVAILABLE_TEXT, true);
       return { speak: UNAVAILABLE_SPOKEN, pause: true };
     } finally {
@@ -743,23 +934,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       {/* 2. Soft Vignette Overlay */}
       <div className="sanctuary-scrim" aria-hidden="true" />
 
-      {/* 3. Conversation History Floating Action (only when messages exist) */}
-      {messages.length > 0 ? (
-        <div className="sanctuary-history-container">
-          <button
-            type="button"
-            className="sanctuary-circle-action sanctuary-history-btn"
-            onClick={() => setHistoryOpen(true)}
-            title="Conversation History"
-            aria-label="View conversation history"
-          >
-            <span>📜 History</span>
-            <span className="nav-count">{messages.length}</span>
-          </button>
-        </div>
-      ) : null}
-
-      {/* 4. Center Dialog & Streaming Captions (No Prebuilt Box) */}
+      {/* 3. Center Dialog & Streaming Captions (No Prebuilt Box) */}
       <div className="sanctuary-dialog-area">
         {/* Sacred Welcome Invitation / Live Companion Status Badge */}
         {!callActive ? (
@@ -896,7 +1071,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
       {/* Slide-Up Verse Drawer / Modal */}
       {verseDrawer ? (
-        <div className="sanctuary-modal-backdrop" onClick={() => setVerseDrawer(null)}>
+        <div className="sanctuary-modal-backdrop sanctuary-modal-backdrop-verse" onClick={() => setVerseDrawer(null)}>
           <div className="sanctuary-modal-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="modal-drag-indicator" aria-hidden="true">
               <span className="drag-pill" />
@@ -932,45 +1107,333 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
             <div className="modal-drag-indicator" aria-hidden="true">
               <span className="drag-pill" />
             </div>
-            <header className="sanctuary-sheet-header">
-              <span className="sanctuary-sheet-title">Conversation with Krishna</span>
-              <button
-                type="button"
-                className="sanctuary-close-btn"
-                onClick={() => setHistoryOpen(false)}
-                aria-label="Close history"
-              >
-                <CloseIcon />
-              </button>
+
+            <header className="sanctuary-sheet-header history-sheet-header">
+              <div className="history-header-left">
+                {historyView === 'transcript' && (pastDialogues.length > 0 || messages.length > 0) ? (
+                  <button
+                    type="button"
+                    className="history-back-btn"
+                    onClick={() => {
+                      setHistoryView('directory');
+                      setSelectedDialogue(null);
+                    }}
+                    aria-label="Back to all dialogues"
+                  >
+                    <span>← All Dialogues</span>
+                  </button>
+                ) : (
+                  <span className="sanctuary-sheet-title">📜 Sacred Dialogues</span>
+                )}
+              </div>
+              <div className="history-header-right">
+                <button
+                  type="button"
+                  className="history-new-btn"
+                  onClick={startNewDialogue}
+                  title="Start a fresh dialogue in the sanctuary"
+                >
+                  <span>+ New</span>
+                </button>
+                <button
+                  type="button"
+                  className="sanctuary-close-btn"
+                  onClick={() => setHistoryOpen(false)}
+                  aria-label="Close history"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
             </header>
-            <div className="sanctuary-history-list">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`history-bubble history-bubble-${msg.role}`}>
-                  <p className="history-sender">{msg.role === 'user' ? 'You' : 'Krishna'}</p>
-                  <p className="history-text">
-                    {msg.role === 'user'
-                      ? msg.text
-                      : msg.role === 'assistant'
-                        ? [msg.reply.acknowledge, msg.reply.connection, msg.reply.step].filter(Boolean).join('\n\n')
-                        : msg.text}
-                  </p>
-                  {msg.role === 'assistant' && msg.verses.length > 0 ? (
-                    <button
-                      type="button"
-                      className="sanctuary-history-verse-link"
+
+            {historyView === 'directory' ? (
+              <div className="history-directory-container">
+                {/* 1. CURRENT SANCTUARY DIALOGUE */}
+                <section className="history-section">
+                  <h3 className="history-section-kicker">Current Sanctuary</h3>
+                  {messages.length > 0 ? (
+                    <div
+                      className="history-chapter-card history-chapter-active"
                       onClick={() => {
-                        setHistoryOpen(false);
-                        setVerseDrawer(msg.verses[0]);
+                        setSelectedDialogue(null);
+                        setHistoryView('transcript');
                       }}
+                      role="button"
+                      tabIndex={0}
                     >
-                      <Lotus className="sanctuary-pill-lotus" />
-                      <span>View Verse {msg.verses[0].chapter}.{msg.verses[0].verse}</span>
-                    </button>
-                  ) : null}
+                      <div className="chapter-card-top">
+                        <span className="chapter-live-badge">● Active Dialogue</span>
+                        <span className="chapter-time">Now</span>
+                      </div>
+                      <h4 className="chapter-card-title">
+                        {generateDialogueTitle(
+                          messages.map((m) => ({
+                            id: m.id,
+                            role: m.role,
+                            text:
+                              m.role === 'user'
+                                ? m.text
+                                : m.role === 'assistant'
+                                ? [m.reply.acknowledge, m.reply.connection, m.reply.step].filter(Boolean).join(' ')
+                                : m.text,
+                            verses: m.role === 'assistant' ? m.verses : undefined,
+                            timestamp: m.timestamp || Date.now(),
+                          })),
+                        )}
+                      </h4>
+                      <div className="chapter-card-meta">
+                        <span className="chapter-meta-exchanges">
+                          {messages.filter((m) => m.role === 'user').length} exchanges
+                        </span>
+                        {activeCitedVerses.map((ref) => (
+                          <span key={ref} className="chapter-verse-tag">
+                            📖 Gita {ref}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="history-empty-active">
+                      <p>No active dialogue in the sanctuary right now.</p>
+                      <p className="history-empty-sub">Speak or type with Krishna to begin your dialogue.</p>
+                    </div>
+                  )}
+                </section>
+
+                {/* 2. PAST DIALOGUES DIRECTORY */}
+                <section className="history-section">
+                  <div className="history-section-header">
+                    <h3 className="history-section-kicker">Past Dialogues</h3>
+                    {pastDialogues.length > 0 ? (
+                      <span className="history-count-tag">{pastDialogues.length} saved</span>
+                    ) : null}
+                  </div>
+
+                  {pastDialogues.length === 0 ? (
+                    <div className="history-empty-past">
+                      <p>No past dialogues archived yet.</p>
+                      <p className="history-empty-sub">
+                        When you start a fresh dialogue, your previous conversations are peacefully archived here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="history-chapters-list">
+                      {pastDialogues.map((session) => (
+                        <div
+                          key={session.id}
+                          className="history-chapter-card"
+                          onClick={() => {
+                            setSelectedDialogue(session);
+                            setHistoryView('transcript');
+                          }}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <div className="chapter-card-top">
+                            <span className="chapter-date">{formatDialogueDate(session.updatedAt)}</span>
+                            <button
+                              type="button"
+                              className="chapter-delete-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteDialogue(session.id);
+                              }}
+                              title="Delete this dialogue"
+                              aria-label="Delete dialogue"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <h4 className="chapter-card-title">{session.title}</h4>
+                          <div className="chapter-card-meta">
+                            <span className="chapter-meta-exchanges">
+                              {session.messages.filter((m) => m.role === 'user').length} exchanges
+                            </span>
+                            {session.citedVerses?.map((ref) => (
+                              <span key={ref} className="chapter-verse-tag">
+                                📖 Gita {ref}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            ) : (
+              /* TRANSCRIPT READING VIEW */
+              <div className="sanctuary-history-transcript-wrap">
+                <div className="transcript-header-banner">
+                  <h4 className="transcript-dialogue-title">
+                    {selectedDialogue
+                      ? selectedDialogue.title
+                      : generateDialogueTitle(
+                          messages.map((m) => ({
+                            id: m.id,
+                            role: m.role,
+                            text:
+                              m.role === 'user'
+                                ? m.text
+                                : m.role === 'assistant'
+                                ? [m.reply.acknowledge, m.reply.connection, m.reply.step].filter(Boolean).join(' ')
+                                : m.text,
+                            verses: m.role === 'assistant' ? m.verses : undefined,
+                            timestamp: m.timestamp || Date.now(),
+                          })),
+                        )}
+                  </h4>
+                  <p className="transcript-dialogue-meta">
+                    {selectedDialogue
+                      ? `${formatDialogueDate(selectedDialogue.updatedAt)} · Walking with Krishna (${profile.persona})`
+                      : `Active Sanctuary · Walking with Krishna (${profile.persona})`}
+                  </p>
                 </div>
-              ))}
-              <div ref={endRef} />
-            </div>
+
+                <div className="sanctuary-history-list">
+                  {(() => {
+                    const displayed = selectedDialogue
+                      ? selectedDialogue.messages
+                      : messages.filter((m) => !('streaming' in m && m.streaming));
+
+                    if (displayed.length === 0) {
+                      return (
+                        <div className="history-empty-past">
+                          <p>No messages in this dialogue yet.</p>
+                        </div>
+                      );
+                    }
+
+                    return displayed.map((msg) => {
+                      const timeStr = msg.timestamp ? formatMessageTime(msg.timestamp) : '';
+
+                      if (msg.role === 'user') {
+                        return (
+                          <div key={msg.id} className="history-bubble history-bubble-user">
+                            <div className="history-bubble-header">
+                              <span className="history-sender">👤 You</span>
+                              {timeStr ? <span className="history-msg-time">{timeStr}</span> : null}
+                            </div>
+                            <p className="history-text">{msg.text}</p>
+                          </div>
+                        );
+                      }
+
+                      if (msg.role === 'assistant') {
+                        const replyObj = 'reply' in msg && msg.reply ? msg.reply : null;
+                        const rawText = 'text' in msg && typeof msg.text === 'string' ? msg.text : '';
+                        const fullText = replyObj
+                          ? [replyObj.acknowledge, replyObj.connection, replyObj.step].filter(Boolean).join('\n\n')
+                          : rawText;
+                        const spokenText = replyObj
+                          ? speakableText(replyObj, undefined, msg.language)
+                          : rawText;
+                        const firstVerse = msg.verses && msg.verses.length > 0 ? msg.verses[0] : null;
+                        const isSpeaking = voice.speakingId === msg.id;
+                        const replyId = 'replyId' in msg ? msg.replyId : undefined;
+
+                        return (
+                          <div key={msg.id} className="history-bubble history-bubble-assistant">
+                            <div className="history-bubble-header">
+                              <div className="history-sender-group">
+                                <span className="history-sender-icon">🌸</span>
+                                <span className="history-sender">Krishna</span>
+                                <span className="history-persona-tag">({profile.persona})</span>
+                              </div>
+                              {timeStr ? <span className="history-msg-time">{timeStr}</span> : null}
+                            </div>
+
+                            <div className="history-text history-three-part">
+                              {replyObj?.acknowledge ? (
+                                <p className="history-part-acknowledge">{replyObj.acknowledge}</p>
+                              ) : null}
+                              {replyObj?.connection ? (
+                                <p className="history-part-connection">{replyObj.connection}</p>
+                              ) : null}
+                              {replyObj?.step ? (
+                                <p className="history-part-step">{replyObj.step}</p>
+                              ) : null}
+                              {!replyObj && fullText ? <p>{fullText}</p> : null}
+                            </div>
+
+                            {msg.verses && msg.verses.length > 0 ? (
+                              <div className="history-bubble-verses">
+                                {msg.verses.map((v) => (
+                                  <button
+                                    key={verseRef(v)}
+                                    type="button"
+                                    className="sanctuary-history-verse-link"
+                                    onClick={() => setVerseDrawer(v)}
+                                    title={`View Bhagavad Gita ${v.chapter}.${v.verse}`}
+                                  >
+                                    <Lotus className="sanctuary-pill-lotus" />
+                                    <span>
+                                      Gita {v.chapter}.{v.verse}
+                                      {v.sanskrit ? ` · ${v.sanskrit.slice(0, 24)}…` : ''}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            <div className="history-bubble-actions">
+                              <button
+                                type="button"
+                                className={`history-action-btn ${isSpeaking ? 'history-action-speaking' : ''}`}
+                                onClick={() => handleReplayVoice(msg.id, spokenText, msg.language, replyId)}
+                                title="Listen to Krishna's voice"
+                              >
+                                <span>{isSpeaking ? '⏹ Stop' : '▶ Replay Voice'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="history-action-btn"
+                                onClick={() => handleCopyKrishnaText(fullText)}
+                                title="Copy Krishna's guidance"
+                              >
+                                <span>📋 Copy</span>
+                              </button>
+                              {firstVerse ? (
+                                <button
+                                  type="button"
+                                  className={`history-action-btn ${
+                                    savedVerses.isSaved(firstVerse) ? 'history-action-saved' : ''
+                                  }`}
+                                  onClick={() => {
+                                    savedVerses.toggle(firstVerse);
+                                    flash(
+                                      savedVerses.isSaved(firstVerse)
+                                        ? 'Removed from My Gita'
+                                        : 'Saved to My Gita',
+                                    );
+                                  }}
+                                  title="Keep verse in My Gita"
+                                >
+                                  <span>
+                                    {savedVerses.isSaved(firstVerse) ? '🔖 Saved' : '🔖 Save Verse'}
+                                  </span>
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={msg.id} className="history-bubble history-bubble-error">
+                          <div className="history-bubble-header">
+                            <span className="history-sender">Notice</span>
+                            {timeStr ? <span className="history-msg-time">{timeStr}</span> : null}
+                          </div>
+                          <p className="history-text">{msg.text}</p>
+                        </div>
+                      );
+                    });
+                  })()}
+                  <div ref={endRef} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
