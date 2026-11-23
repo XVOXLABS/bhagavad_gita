@@ -2,8 +2,35 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const AMBIENT_PREF_KEY = 'gita.ambientSound';
-const AMBIENT_VOL_KEY = 'gita.ambientVolume';
+export const AMBIENT_PREF_KEY = 'gita.ambientSound';
+export const AMBIENT_VOL_KEY = 'gita.ambientVolume';
+export const AMBIENT_TRACK_KEY = 'gita.ambientTrack';
+
+export const DEFAULT_AMBIENT_TRACK = '/audio/sanctuary-ambient.wav';
+export const CUSTOM_AMBIENT_TRACK = '/audio/krishna-flute-ambient.mp3';
+
+export type AmbientTrackOption = {
+  id: string;
+  name: string;
+  path: string;
+  description: string;
+};
+
+export const AMBIENT_TRACKS: AmbientTrackOption[] = [
+  {
+    id: 'krishna-flute',
+    name: 'Krishna Flute & Bhakti Music',
+    path: CUSTOM_AMBIENT_TRACK,
+    description: 'Devotional Krishna bansuri flute and sacred bhakti songs',
+  },
+  {
+    id: 'sanctuary-tanpura',
+    name: 'Sacred Sanctuary Soundscape',
+    path: DEFAULT_AMBIENT_TRACK,
+    description: 'Om drone, meditative Tanpura plucks, and subtle bansuri',
+  },
+];
+
 const DEFAULT_VOLUME = 0.18; // 18% volume is soft, serene, and non-intrusive ("lite")
 const DUCKED_VOLUME = 0.05;  // 5% volume when Krishna or devotee is speaking
 
@@ -15,6 +42,9 @@ class AmbientManager {
   private targetVolume = DEFAULT_VOLUME;
   private isDucked = false;
   private userEnabled = true;
+  private currentTrack = CUSTOM_AMBIENT_TRACK;
+  private isFallback = false;
+  private listeners = new Set<() => void>();
 
   private constructor() {
     if (typeof window !== 'undefined') {
@@ -28,6 +58,13 @@ class AmbientManager {
           this.targetVolume = parsed;
         }
       }
+
+      const savedTrack = localStorage.getItem(AMBIENT_TRACK_KEY);
+      if (savedTrack) {
+        this.currentTrack = savedTrack;
+      } else {
+        this.currentTrack = CUSTOM_AMBIENT_TRACK;
+      }
     }
   }
 
@@ -38,12 +75,36 @@ class AmbientManager {
     return AmbientManager.instance;
   }
 
+  public subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  private notify() {
+    this.listeners.forEach((fn) => fn());
+  }
+
   private initAudio() {
     if (this.audio || typeof window === 'undefined') return;
-    this.audio = new Audio('/audio/sanctuary-ambient.wav');
+    this.audio = new Audio(this.currentTrack);
     this.audio.loop = true;
     this.audio.volume = 0;
     this.audio.preload = 'auto';
+
+    // Automatic Fallback System:
+    // If the custom music fails to load, 404s, or has a decoding error,
+    // seamlessly switch back to the default sanctuary track!
+    this.audio.addEventListener('error', (e) => {
+      if (this.currentTrack !== DEFAULT_AMBIENT_TRACK) {
+        console.warn(
+          `[AmbientSound] Custom music "${this.currentTrack}" failed to load. Gracefully switching back to default track.`,
+          e
+        );
+        this.fallbackToDefault();
+      }
+    });
   }
 
   public isEnabled(): boolean {
@@ -52,6 +113,14 @@ class AmbientManager {
 
   public getVolume(): number {
     return this.targetVolume;
+  }
+
+  public getTrack(): string {
+    return this.currentTrack;
+  }
+
+  public getIsFallback(): boolean {
+    return this.isFallback;
   }
 
   public setEnabled(enabled: boolean) {
@@ -64,6 +133,7 @@ class AmbientManager {
     } else {
       this.stop();
     }
+    this.notify();
   }
 
   public setVolume(vol: number) {
@@ -74,6 +144,52 @@ class AmbientManager {
     if (this.userEnabled && this.audio && !this.audio.paused && !this.isDucked) {
       this.fadeTo(this.targetVolume, 200);
     }
+    this.notify();
+  }
+
+  public setTrack(trackPath: string) {
+    if (!trackPath || trackPath === this.currentTrack) return;
+    this.currentTrack = trackPath;
+    this.isFallback = false;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(AMBIENT_TRACK_KEY, trackPath);
+    }
+    if (this.audio) {
+      const wasPlaying = !this.audio.paused;
+      this.audio.src = trackPath;
+      this.audio.load();
+      if (wasPlaying && this.userEnabled) {
+        const p = this.audio.play();
+        if (p) {
+          p.then(() => {
+            const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
+            this.fadeTo(goal, 1200);
+          }).catch(() => {});
+        }
+      }
+    }
+    this.notify();
+  }
+
+  public fallbackToDefault() {
+    if (this.currentTrack === DEFAULT_AMBIENT_TRACK) return;
+    this.currentTrack = DEFAULT_AMBIENT_TRACK;
+    this.isFallback = true;
+    if (this.audio) {
+      const wasPlaying = !this.audio.paused || this.userEnabled;
+      this.audio.src = DEFAULT_AMBIENT_TRACK;
+      this.audio.load();
+      if (wasPlaying && this.userEnabled) {
+        const p = this.audio.play();
+        if (p) {
+          p.then(() => {
+            const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
+            this.fadeTo(goal, 1200);
+          }).catch(() => {});
+        }
+      }
+    }
+    this.notify();
   }
 
   public play() {
@@ -91,8 +207,15 @@ class AmbientManager {
             const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
             this.fadeTo(goal, 1200);
           })
-          .catch(() => {
-            // Autoplay policy prevented playback until user gesture
+          .catch((err) => {
+            if (err?.name === 'NotAllowedError') {
+              // Autoplay policy prevented playback until user gesture
+              return;
+            }
+            if (this.currentTrack !== DEFAULT_AMBIENT_TRACK) {
+              console.warn('[AmbientSound] Playback error on custom track, falling back to default:', err);
+              this.fallbackToDefault();
+            }
           });
       }
     } else {
@@ -170,41 +293,75 @@ export function useAmbientSound() {
     const saved = localStorage.getItem(AMBIENT_VOL_KEY);
     return saved ? parseFloat(saved) || DEFAULT_VOLUME : DEFAULT_VOLUME;
   });
+  const [track, setTrackState] = useState(() => {
+    if (typeof window === 'undefined') return CUSTOM_AMBIENT_TRACK;
+    return localStorage.getItem(AMBIENT_TRACK_KEY) || CUSTOM_AMBIENT_TRACK;
+  });
+  const [isFallback, setIsFallbackState] = useState(false);
 
   const managerRef = useRef<AmbientManager | null>(null);
 
   useEffect(() => {
-    managerRef.current = AmbientManager.getInstance();
+    const mgr = AmbientManager.getInstance();
+    managerRef.current = mgr;
+    setEnabledState(mgr.isEnabled());
+    setVolumeState(mgr.getVolume());
+    setTrackState(mgr.getTrack());
+    setIsFallbackState(mgr.getIsFallback());
+
+    return mgr.subscribe(() => {
+      setEnabledState(mgr.isEnabled());
+      setVolumeState(mgr.getVolume());
+      setTrackState(mgr.getTrack());
+      setIsFallbackState(mgr.getIsFallback());
+    });
   }, []);
 
   const toggle = useCallback(() => {
-    const next = !enabled;
-    setEnabledState(next);
-    managerRef.current?.setEnabled(next);
-  }, [enabled]);
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.setEnabled(!mgr.isEnabled());
+  }, []);
 
   const setVolume = useCallback((vol: number) => {
-    setVolumeState(vol);
-    managerRef.current?.setVolume(vol);
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.setVolume(vol);
+  }, []);
+
+  const setTrack = useCallback((trackPath: string) => {
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.setTrack(trackPath);
+  }, []);
+
+  const fallbackToDefault = useCallback(() => {
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.fallbackToDefault();
   }, []);
 
   const play = useCallback(() => {
-    managerRef.current?.play();
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.play();
   }, []);
 
   const stop = useCallback(() => {
-    managerRef.current?.stop();
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.stop();
   }, []);
 
   const duck = useCallback((ducked: boolean) => {
-    managerRef.current?.duck(ducked);
+    const mgr = managerRef.current ?? AmbientManager.getInstance();
+    mgr.duck(ducked);
   }, []);
 
   return {
     enabled,
     volume,
+    track,
+    isFallback,
+    tracks: AMBIENT_TRACKS,
     toggle,
     setVolume,
+    setTrack,
+    fallbackToDefault,
     play,
     stop,
     duck,

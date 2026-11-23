@@ -107,7 +107,7 @@ export type VadState = { startedAt: number; heardSpeech: boolean; lastVoiceAt: n
 export const VAD = {
   /** RMS level (0-1) above which the frame counts as speech. */
   speechLevel: 0.035,
-  silenceAfterSpeechMs: 1200,
+  silenceAfterSpeechMs: 1800,
   noSpeechMs: 7000,
   maxMs: 60_000,
 };
@@ -186,12 +186,25 @@ export type TalkState = {
 export type TalkEvent =
   | { type: 'start' }
   | { type: 'heard'; text: string }
+  | { type: 'stitch'; text: string }
   | { type: 'silence' }
   | { type: 'replied'; pause: boolean }
   | { type: 'doneSpeaking' }
   | { type: 'interrupt' }
   | { type: 'failed'; note: string }
   | { type: 'end' };
+
+/**
+ * Merges split thoughts from contemplative pauses into a unified divine query.
+ * Preserves sentence flow, punctuation, and handles whitespace cleanly.
+ */
+export function stitchThoughts(part1: string, part2: string): string {
+  const p1 = part1.trim();
+  const p2 = part2.trim();
+  if (!p1) return p2;
+  if (!p2) return p1;
+  return `${p1} ${p2}`.replace(/\s+/g, ' ').trim();
+}
 
 export const MAX_SILENT_TURNS = 2;
 
@@ -208,6 +221,9 @@ export function nextTalkState(state: TalkState, event: TalkEvent): TalkState {
     case 'paused':
       return event.type === 'start' || event.type === 'interrupt' ? listen(state) : state;
     case 'listening':
+      if (event.type === 'stitch') {
+        return event.text.trim() ? { ...state, mode: 'thinking', misses: 0, turn: state.turn + 1 } : state;
+      }
       if (event.type === 'heard') {
         return event.text.trim() ? { ...state, mode: 'thinking', misses: 0 } : nextTalkState(state, { type: 'silence' });
       }
@@ -220,6 +236,9 @@ export function nextTalkState(state: TalkState, event: TalkEvent): TalkState {
       if (event.type === 'failed') return { ...state, mode: 'paused', note: event.note };
       return state;
     case 'thinking':
+      if (event.type === 'stitch') {
+        return { ...state, mode: 'thinking', misses: 0, turn: state.turn + 1 };
+      }
       if (event.type === 'replied') return { ...state, mode: 'speaking', pauseAfterSpeaking: event.pause };
       if (event.type === 'failed') return { ...state, mode: 'paused', note: event.note };
       if (event.type === 'interrupt' || event.type === 'start') return listen(state);

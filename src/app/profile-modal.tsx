@@ -26,6 +26,7 @@ import {
   getLastSyncedAt,
   formatLastSynced,
 } from '@/lib/sync';
+import { useAmbientSound } from '@/lib/ambient-sound';
 import { readPref, writePref } from './use-speech';
 
 const MIC_LANG_KEY = 'gita.micLang';
@@ -82,6 +83,8 @@ export function ProfileModal({
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => getLastSyncedAt());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const ambient = useAmbientSound();
 
   function flash(msg: string) {
     setToastMessage(msg);
@@ -337,18 +340,95 @@ export function ProfileModal({
                 />
               </div>
 
+              {/* Sacred Ambient Soundscape Setting */}
+              <div className="personalize-field">
+                <div className="personalize-ambient-row">
+                  <div>
+                    <label htmlFor="ambient-toggle" className="personalize-label" style={{ marginBottom: 0 }}>
+                      Sacred Ambient Music
+                    </label>
+                    <p className="personalize-hint">
+                      Devotional flute, Tanpura plucks, and meditative drone
+                    </p>
+                  </div>
+                  <input
+                    id="ambient-toggle"
+                    type="checkbox"
+                    className="switch"
+                    checked={ambient.enabled}
+                    onChange={() => ambient.toggle()}
+                  />
+                </div>
+                {ambient.enabled && (
+                  <>
+                    <div style={{ marginTop: 'var(--space-2)' }}>
+                      <label htmlFor="ambient-track-select" className="personalize-label" style={{ fontSize: 'var(--size-12)' }}>
+                        Select Background Music Track
+                      </label>
+                      <select
+                        id="ambient-track-select"
+                        className="personalize-input"
+                        value={ambient.track}
+                        onChange={(e) => ambient.setTrack(e.target.value)}
+                        style={{ fontSize: 'var(--size-13)', padding: '6px 10px' }}
+                      >
+                        {ambient.tracks.map((t) => (
+                          <option key={t.id} value={t.path}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      {ambient.isFallback && (
+                        <p className="personalize-hint" style={{ color: 'var(--gold-300)' }}>
+                          ℹ️ Custom track failed to load — automatically switched back to default soundscape.
+                        </p>
+                      )}
+                    </div>
+                    <div className="personalize-volume-row">
+                      <span className="volume-label">Volume ({Math.round(ambient.volume * 100)}%)</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={ambient.volume}
+                        onChange={(e) => ambient.setVolume(parseFloat(e.target.value))}
+                        className="ambient-slider"
+                        aria-label="Ambient Sound Volume"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* Save Profile Button */}
               <div className="personalize-actions">
                 <button
                   type="button"
-                  className="btn btn-primary"
+                  className="btn btn-secondary"
+                  onClick={onClose}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-primary ${isSaved ? 'btn-saved' : ''}`}
                   onClick={() => {
+                    setIsSaved(true);
                     writeProfile(profileDraft);
                     setProfile(profileDraft);
+                    if (user?.id) {
+                      void syncUserData(user.id);
+                    }
                     flash('Companion preferences & name saved');
+                    setTimeout(() => {
+                      setIsSaved(false);
+                      onClose();
+                    }, 500);
                   }}
+                  disabled={isSaved}
                 >
-                  Save Preferences
+                  {isSaved ? '✓ Saved!' : 'Save Preferences'}
                 </button>
               </div>
             </div>

@@ -8,6 +8,7 @@ import {
   pickVoice,
   speakableText,
   startVad,
+  stitchThoughts,
   TALK_OFF,
   VAD,
   voiceForLanguage,
@@ -186,5 +187,70 @@ test('barge-in interruption during speaking and thinking transitions cleanly to 
   assert.equal(startFromThinking.mode, 'listening');
   assert.equal(startFromThinking.turn, 5);
 });
+
+test('stitchThoughts merges split sentences naturally without awkward punctuation', () => {
+  // Scenario 1: Natural continuation sentence
+  const stitched1 = stitchThoughts(
+    'Krishna, I feel overwhelmed at work',
+    'and my manager is giving conflicting orders',
+  );
+  assert.equal(
+    stitched1,
+    'Krishna, I feel overwhelmed at work and my manager is giving conflicting orders',
+  );
+
+  // Scenario 2: Two punctuated sentences
+  const stitched2 = stitchThoughts(
+    'I feel so much grief.',
+    'How do I let go of what is lost?',
+  );
+  assert.equal(
+    stitched2,
+    'I feel so much grief. How do I let go of what is lost?',
+  );
+
+  // Scenario 3: Whitespace trimming and empty handling
+  assert.equal(stitchThoughts('   Hello Krishna   ', '  how are you?  '), 'Hello Krishna how are you?');
+  assert.equal(stitchThoughts('', 'Only second part'), 'Only second part');
+  assert.equal(stitchThoughts('Only first part', ''), 'Only first part');
+  assert.equal(stitchThoughts('', ''), '');
+});
+
+test('thought stitching during thinking state keeps thinking active and increments turn', () => {
+  let state = nextTalkState(TALK_OFF, { type: 'start' });
+  assert.equal(state.mode, 'listening');
+  assert.equal(state.turn, 1);
+
+  // 1. User says Part 1
+  state = nextTalkState(state, { type: 'heard', text: 'Krishna, I feel overwhelmed' });
+  assert.equal(state.mode, 'thinking');
+  assert.equal(state.turn, 1);
+
+  // 2. Devotee speaks Part 2 while thinking: Thought Stitching triggers
+  state = nextTalkState(state, {
+    type: 'stitch',
+    text: 'Krishna, I feel overwhelmed and my manager is giving conflicting orders',
+  });
+  assert.equal(state.mode, 'thinking');
+  assert.equal(state.turn, 2); // Turn increments to reset thinking listener for subsequent clauses!
+
+  // 3. Devotee speaks Part 3 while thinking
+  state = nextTalkState(state, {
+    type: 'stitch',
+    text: 'Krishna, I feel overwhelmed and my manager is giving conflicting orders. Please guide me.',
+  });
+  assert.equal(state.mode, 'thinking');
+  assert.equal(state.turn, 3);
+
+  // 4. Server responds to unified thought
+  state = nextTalkState(state, { type: 'replied', pause: false });
+  assert.equal(state.mode, 'speaking');
+
+  // 5. Done speaking returns to listening
+  state = nextTalkState(state, { type: 'doneSpeaking' });
+  assert.equal(state.mode, 'listening');
+  assert.equal(state.turn, 4);
+});
+
 
 

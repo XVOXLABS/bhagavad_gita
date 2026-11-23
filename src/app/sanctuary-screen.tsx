@@ -52,6 +52,7 @@ import {
   formatDialogueDate,
   DIALOGUES_EVENT,
 } from '@/lib/dialogue-history';
+import { useAmbientSound } from '@/lib/ambient-sound';
 import { useBargeIn, BARGE_IN_PREF_KEY } from './use-barge-in';
 import { avatarEngine } from './avatar/anam-engine';
 import { KrishnaAvatar, useAvatarState } from './avatar/krishna-avatar';
@@ -228,6 +229,10 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   const [sttDown, setSttDown] = useState(false);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [pending, setPending] = useState<'send' | null>(null);
+  const [isStitching, setIsStitching] = useState(false);
+  const inFlightAbortRef = useRef<AbortController | null>(null);
+  const lastUserMsgIdRef = useRef<string | null>(null);
+  const ambient = useAmbientSound();
 
   const savedVerses = useSavedVerses();
   const endRef = useRef<HTMLDivElement>(null);
@@ -247,6 +252,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           if (result.error === 'unavailable') setSttDown(true);
           onEnd(result);
         }, options),
+      hasSpeech: recorder.hasSpeech,
     }
     : browserDictation;
 
@@ -710,7 +716,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     speakNow();
   }
 
-  async function sendMessage(text: string): Promise<TalkTurn> {
+  async function sendMessage(text: string, isStitch = false): Promise<TalkTurn> {
     const message = text.trim();
     if (!message) return { speak: '', pause: true };
     setPending('send');
@@ -719,7 +725,22 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     currentWindowRef.current = '';
     setCaption('');
     setIsStreaming(false);
-    setMessages((curr) => [...curr, { id: uid(), role: 'user', text: message, timestamp: Date.now() }]);
+
+    // Cleanly cancel any previous in-flight request before sending a new or stitched thought
+    inFlightAbortRef.current?.abort();
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
+
+    if (isStitch && lastUserMsgIdRef.current) {
+      // Thought Stitching: seamlessly update existing devotee bubble without fragments
+      setMessages((curr) =>
+        curr.map((item) => (item.id === lastUserMsgIdRef.current ? { ...item, text: message } : item))
+      );
+    } else {
+      const userMsgId = uid();
+      lastUserMsgIdRef.current = userMsgId;
+      setMessages((curr) => [...curr, { id: userMsgId, role: 'user', text: message, timestamp: Date.now() }]);
+    }
 
     const id = uid();
     const withoutDraft = (curr: UiMessage[]) => curr.filter((item) => item.id !== id);
@@ -748,6 +769,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       });
 
     const onEvent = (event: StreamEvent) => {
+      if (controller.signal.aborted) return;
       if (event.type === 'verses') {
         if (event.verses.length > 0 || event.crisis) {
           patchDraft((item) => ({ ...item, verses: event.verses, crisis: event.crisis }));
@@ -771,9 +793,21 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, message, stream: true, profile, memories }),
+        signal: controller.signal,
       });
+
+      if (controller.signal.aborted) {
+        setMessages((curr) => withoutDraft(curr));
+        return { speak: '', pause: true, aborted: true };
+      }
+
       const streamed = response.ok && response.body && (response.headers.get('content-type') ?? '').includes('ndjson');
       const data = streamed ? await readStream(response.body!, onEvent) : ((await response.json()) as ChatResponse);
+
+      if (controller.signal.aborted) {
+        setMessages((curr) => withoutDraft(curr));
+        return { speak: '', pause: true, aborted: true };
+      }
 
       if (data?.newMemories && data.newMemories.length > 0) {
         const merged = mergeMemories(readMemories(), data.newMemories);
@@ -810,17 +844,28 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
         pushWordsToStream(spoken || data.guidance, true);
       }
       const remoteUrl = ttsUrl(replyId);
+      setIsStitching(false);
       return { speak: spoken, pause: Boolean(crisis), language, remoteUrl };
-    } catch {
+    } catch (err) {
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        setMessages((curr) => withoutDraft(curr));
+        return { speak: '', pause: true, aborted: true };
+      }
       setMessages((curr) => [...withoutDraft(curr), { id: uid(), role: 'error', text: UNAVAILABLE_TEXT, crisis: null, timestamp: Date.now() }]);
       pushWordsToStream(UNAVAILABLE_TEXT, true);
       return { speak: UNAVAILABLE_SPOKEN, pause: true };
     } finally {
-      setPending(null);
+      if (inFlightAbortRef.current === controller) {
+        setPending(null);
+      }
     }
   }
 
-  const talk = useTalkMode(voice, dictation, sendMessage);
+  const talk = useTalkMode(voice, dictation, sendMessage, {
+    onStitch: () => {
+      setIsStitching(true);
+    },
+  });
 
   /** Streams the initial greeting words in sync with voice audio, strictly within 2 lines */
   function startCompanion() {
@@ -838,6 +883,7 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
   /** Immediately interrupts Krishna's voice, stops avatar lip-sync, and clears streaming subtitles */
   function stopKrishnaSpeaking() {
+    setIsStitching(false);
     voice.stop();
     avatarEngine().stop();
     if (streamIntervalRef.current) {
@@ -863,6 +909,29 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       flash('I hear you… listening');
     },
   });
+
+  // Play ambient flute and tanpura soundscape on mount / first user interaction
+  useEffect(() => {
+    if (ambient.enabled) {
+      ambient.play();
+    }
+    const onFirstInteraction = () => {
+      if (ambient.enabled) {
+        ambient.play();
+      }
+    };
+    window.addEventListener('pointerdown', onFirstInteraction, { once: true });
+    window.addEventListener('keydown', onFirstInteraction, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onFirstInteraction);
+      window.removeEventListener('keydown', onFirstInteraction);
+    };
+  }, [ambient.enabled, ambient]);
+
+  // Automatically duck ambient sound when Krishna is speaking so dialogue is pristine
+  useEffect(() => {
+    ambient.duck(isSpeaking);
+  }, [isSpeaking, ambient]);
 
   function handleMicTap() {
     unlockAudio();
@@ -909,6 +978,8 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     statusText = 'Krishna is present with you';
   } else if (currentMode === 'listening') {
     statusText = 'I am listening… speak freely';
+  } else if (isStitching) {
+    statusText = 'Connecting your thought…';
   } else if (currentMode === 'thinking' || pending === 'send') {
     statusText = 'Krishna is reflecting on your words…';
   } else if (currentMode === 'speaking' || voice.speakingId) {
@@ -933,6 +1004,35 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
       {/* 2. Soft Vignette Overlay */}
       <div className="sanctuary-scrim" aria-hidden="true" />
+
+      {/* Sacred Top HUD Controls (Ambient Soundscape Chip) */}
+      <div className="sanctuary-top-hud">
+        <button
+          type="button"
+          className={`sanctuary-ambient-chip ${ambient.enabled ? 'sanctuary-ambient-active' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            ambient.toggle();
+          }}
+          title={
+            ambient.enabled
+              ? `${ambient.isFallback ? 'Default Sanctuary Ambient' : 'Krishna Flute & Bhakti Music'} · Click to Pause`
+              : 'Ambient Music Paused · Click to Play'
+          }
+          aria-label={ambient.enabled ? 'Pause sacred ambient sound' : 'Play sacred ambient sound'}
+        >
+          <span className="ambient-chip-icon" aria-hidden="true">
+            {ambient.enabled ? '🪈' : '🔇'}
+          </span>
+          <span className="ambient-chip-text">
+            {ambient.enabled
+              ? ambient.isFallback
+                ? 'Sacred Ambient'
+                : 'Krishna Flute'
+              : 'Music Muted'}
+          </span>
+        </button>
+      </div>
 
       {/* 3. Center Dialog & Streaming Captions (No Prebuilt Box) */}
       <div className="sanctuary-dialog-area">

@@ -8,6 +8,7 @@ import {
   nextVadState,
   pickVoice,
   startVad,
+  stitchThoughts,
   TALK_OFF,
   voiceForLanguage,
   VOICE_PITCH,
@@ -277,6 +278,7 @@ export type Listener = {
   interim: string;
   level: number;
   transcribing: boolean;
+  hasSpeech?: () => boolean;
   start(onEnd: (result: DictationEnd) => void, options?: ListenOptions): void | Promise<void>;
   stop(): void;
   cancel(): void;
@@ -371,7 +373,9 @@ export function useDictation(lang: string) {
     setInterim('');
   }, []);
 
-  return { supported, listening, interim, start, stop, cancel, level: 0, transcribing: false };
+  const hasSpeech = useCallback(() => Boolean(interim.trim()), [interim]);
+
+  return { supported, listening, interim, start, stop, cancel, level: 0, transcribing: false, hasSpeech };
 }
 
 const RECORDER_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -531,19 +535,31 @@ export function useRecorder(lang: string, enabled: boolean) {
     setTranscribing(false);
   }, [finish]);
 
-  return { supported: enabled && available, listening, interim: '', start, stop, cancel, level, transcribing };
+  const hasSpeech = useCallback(() => {
+    return Boolean(active.current?.vad.heardSpeech || transcribing);
+  }, [transcribing]);
+
+  return { supported: enabled && available, listening, interim: '', start, stop, cancel, level, transcribing, hasSpeech };
 }
 
-export type TalkTurn = { speak: string; pause: boolean; language?: string; remoteUrl?: string };
+export type TalkTurn = { speak: string; pause: boolean; language?: string; remoteUrl?: string; aborted?: boolean };
+
+export type TalkModeOptions = {
+  onStitch?: (mergedText: string, additionalText: string) => void;
+};
 
 /**
  * Hands-free conversation: listen, send what was heard, speak the reply, listen again.
- * The mic is never open while Krishna speaks, so speakers cannot feed his voice back in.
+ * Features Contemplative Silence & Thought Stitching:
+ * - Listens actively even during 'thinking' state so late utterances merge automatically.
+ * - Holds server reply if devotee is actively speaking continuation thoughts.
+ * - Cancels mic cleanly before Krishna speaks so his own voice is never fed back.
  */
 export function useTalkMode(
   voice: ReturnType<typeof useKrishnaVoice>,
-  dictation: Pick<Listener, 'start' | 'cancel'>,
-  send: (text: string) => Promise<TalkTurn>,
+  dictation: Pick<Listener, 'start' | 'cancel'> & { hasSpeech?: () => boolean },
+  send: (text: string, isStitch?: boolean) => Promise<TalkTurn>,
+  options?: TalkModeOptions,
 ) {
   const [state, dispatch] = useReducer(nextTalkState, TALK_OFF);
   const live = useRef<TalkState>(state);
@@ -554,31 +570,122 @@ export function useTalkMode(
   speakRef.current = voice.speak;
   const listenRef = useRef(dictation.start);
   listenRef.current = dictation.start;
+  const hasSpeechRef = useRef(dictation.hasSpeech);
+  hasSpeechRef.current = dictation.hasSpeech;
+  const onStitchRef = useRef(options?.onStitch);
+  onStitchRef.current = options?.onStitch;
 
   const { cancel: cancelListening } = dictation;
   const { stop: stopSpeaking } = voice;
 
+  const lastSpeechRef = useRef<string>('');
+  const inFlightTokenRef = useRef<number>(0);
+  const heldReplyRef = useRef<TalkTurn | null>(null);
+
+  // 1. Listening Phase (Normal speech input)
   useEffect(() => {
     if (state.mode !== 'listening') return;
     const turn = state.turn;
+    heldReplyRef.current = null;
+
     listenRef.current(({ text, error }) => {
       if (live.current.mode !== 'listening' || live.current.turn !== turn) return;
       if (error === 'not-allowed' || error === 'failed' || error === 'unavailable') {
         dispatch({ type: 'failed', note: micErrorMessage(error) });
         return;
       }
-      if (!text) {
+      const spoken = text?.trim() ?? '';
+      if (!spoken) {
         dispatch({ type: 'silence' });
         return;
       }
-      dispatch({ type: 'heard', text });
-      void sendRef.current(text).then((reply) => {
-        if (live.current.mode !== 'thinking') return;
+
+      lastSpeechRef.current = spoken;
+      const myToken = ++inFlightTokenRef.current;
+      dispatch({ type: 'heard', text: spoken });
+
+      void sendRef.current(spoken, false).then((reply) => {
+        if (reply?.aborted || inFlightTokenRef.current !== myToken || live.current.mode !== 'thinking') return;
+
+        // If devotee started speaking continuation during thinking:
+        if (hasSpeechRef.current?.()) {
+          heldReplyRef.current = reply;
+          return;
+        }
+
         dispatch({ type: 'replied', pause: reply.pause });
         speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language, reply.remoteUrl);
       });
     });
   }, [state.mode, state.turn]);
+
+  // 2. Thinking Phase: Active Listener to remove deaf blindspot and auto-stitch continuation thoughts
+  useEffect(() => {
+    if (state.mode !== 'thinking') return;
+    const turn = state.turn;
+    let cancelled = false;
+
+    // Small grace delay (60ms) to ensure audio hardware handle is ready
+    const timer = window.setTimeout(() => {
+      if (cancelled || live.current.mode !== 'thinking' || live.current.turn !== turn) return;
+
+      function startListeningDuringThinking() {
+        if (cancelled || live.current.mode !== 'thinking' || live.current.turn !== turn) return;
+
+        listenRef.current(({ text, error }) => {
+          if (cancelled || live.current.mode !== 'thinking' || live.current.turn !== turn) return;
+
+          const additional = text?.trim() ?? '';
+          if (!additional) {
+            // No speech recognized in this slice.
+            // If a server reply was held waiting on this check (e.g. cough/noise), play it now!
+            if (heldReplyRef.current && live.current.mode === 'thinking') {
+              const reply = heldReplyRef.current;
+              heldReplyRef.current = null;
+              dispatch({ type: 'replied', pause: reply.pause });
+              speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language, reply.remoteUrl);
+              return;
+            }
+            // Loop listener while Krishna is still reflecting, unless permission failed
+            if (live.current.mode === 'thinking' && live.current.turn === turn && error !== 'not-allowed' && error !== 'failed') {
+              startListeningDuringThinking();
+            }
+            return;
+          }
+
+          // Devotee spoke continuation thought! Thought Stitching triggers:
+          heldReplyRef.current = null;
+          const merged = stitchThoughts(lastSpeechRef.current, additional);
+          lastSpeechRef.current = merged;
+
+          onStitchRef.current?.(merged, additional);
+
+          const myToken = ++inFlightTokenRef.current;
+          dispatch({ type: 'stitch', text: merged });
+
+          void sendRef.current(merged, true).then((reply) => {
+            if (reply?.aborted || inFlightTokenRef.current !== myToken || live.current.mode !== 'thinking') return;
+
+            if (hasSpeechRef.current?.()) {
+              heldReplyRef.current = reply;
+              return;
+            }
+
+            dispatch({ type: 'replied', pause: reply.pause });
+            speakRef.current('talk', reply.speak, () => dispatch({ type: 'doneSpeaking' }), reply.language, reply.remoteUrl);
+          });
+        });
+      }
+
+      startListeningDuringThinking();
+    }, 60);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      cancelListening();
+    };
+  }, [state.mode, state.turn, cancelListening]);
 
   const begin = useCallback(() => {
     stopSpeaking();
