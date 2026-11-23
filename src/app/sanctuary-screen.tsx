@@ -83,10 +83,12 @@ type Crisis = { message: string; helplines: { name: string; number: string; note
 type Stage = 'understanding' | 'searching' | 'choosing' | 'writing';
 
 type StreamEvent =
+  | { type: 'init'; replyId: string }
   | { type: 'stage'; stage: Stage }
-  | { type: 'verses'; verses: DisplayVerse[]; crisis: Crisis }
-  | { type: 'delta'; field: keyof Reply; text: string }
+  | { type: 'verses'; verses: DisplayVerse[]; crisis: Crisis; replyId?: string }
+  | { type: 'delta'; field: keyof Reply; text: string; replyId?: string; chunkIndex?: number }
   | { type: 'reset' }
+  | { type: 'memories'; newMemories: { fact: string; category?: MemoryCategory; associatedVerse?: string }[] }
   | ({ type: 'done' } & ChatResponse);
 
 type ChatStatus = 'answered' | 'no_strong_match' | 'conversation' | 'unavailable';
@@ -743,6 +745,10 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     }
 
     const id = uid();
+    let pipelinedReplyId: string | null = null;
+    let chunkCounter = 0;
+    let hasStartedVoicePipelining = false;
+
     const withoutDraft = (curr: UiMessage[]) => curr.filter((item) => item.id !== id);
     const patchDraft = (change: (item: Extract<UiMessage, { role: 'assistant' }>) => Extract<UiMessage, { role: 'assistant' }>) =>
       setMessages((curr) => {
@@ -770,7 +776,9 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
 
     const onEvent = (event: StreamEvent) => {
       if (controller.signal.aborted) return;
-      if (event.type === 'verses') {
+      if (event.type === 'init') {
+        pipelinedReplyId = event.replyId;
+      } else if (event.type === 'verses') {
         if (event.verses.length > 0 || event.crisis) {
           patchDraft((item) => ({ ...item, verses: event.verses, crisis: event.crisis }));
         }
@@ -780,6 +788,37 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           ...item,
           reply: { ...item.reply, [event.field]: item.reply[event.field] + event.text },
         }));
+
+        // Latency Optimization & Voice Pipelining:
+        // Begin speech playback immediately as soon as Sentence 1 arrives!
+        if (voice.supported && !controller.signal.aborted) {
+          const rId = event.replyId || pipelinedReplyId;
+          const cIdx = typeof event.chunkIndex === 'number' ? event.chunkIndex : chunkCounter++;
+          const remoteUrl = rId
+            ? `/api/tts?sessionId=${encodeURIComponent(sessionId)}&replyId=${encodeURIComponent(rId)}&chunk=${cIdx}`
+            : undefined;
+
+          if (!hasStartedVoicePipelining) {
+            hasStartedVoicePipelining = true;
+            talk.notifySpeaking();
+          }
+
+          voice.pipelineChunk({
+            id: callActive ? 'talk' : id,
+            text: event.text,
+            chunkIndex: cIdx,
+            remoteUrl,
+            language: profile?.language || 'en',
+          });
+        }
+      } else if (event.type === 'memories') {
+        if (event.newMemories && event.newMemories.length > 0) {
+          const merged = mergeMemories(readMemories(), event.newMemories as CompanionMemory[]);
+          writeMemories(merged);
+          setMemories(merged);
+          const snippet = event.newMemories[0].fact.slice(0, 45);
+          flash(`Krishna remembered: "${snippet}…"`);
+        }
       } else if (event.type === 'reset') {
         wordQueueRef.current = [];
         currentWindowRef.current = '';
@@ -845,7 +884,13 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
       }
       const remoteUrl = ttsUrl(replyId);
       setIsStitching(false);
-      return { speak: spoken, pause: Boolean(crisis), language, remoteUrl };
+      return {
+        speak: spoken,
+        pause: Boolean(crisis),
+        language,
+        remoteUrl,
+        pipelined: hasStartedVoicePipelining,
+      };
     } catch (err) {
       if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
         setMessages((curr) => withoutDraft(curr));
@@ -962,8 +1007,12 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
     setCallActive(true);
     void sendMessage(text).then((turn) => {
       if (turn.speak && voice.supported) {
-        unlockAudio();
-        voice.speak('text-reply', turn.speak, undefined, turn.language, turn.remoteUrl);
+        if (!turn.pipelined) {
+          unlockAudio();
+          voice.speak('text-reply', turn.speak, undefined, turn.language, turn.remoteUrl);
+        } else {
+          voice.pipelineFinalize('text-reply');
+        }
       }
     });
   }

@@ -2,7 +2,7 @@ import { KRISHNA_GREETING } from '@/lib/greeting';
 import { ElevenError, elevenConfig, streamSpeech, type SpeechFormat } from '@/lib/elevenlabs';
 import { safeErrorMessage } from '@/lib/llm';
 import { clientKey, limits } from '@/lib/rate-limit';
-import { findReply } from '@/lib/session';
+import { findReply, findReplyChunk } from '@/lib/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -31,10 +31,21 @@ export async function GET(request: Request): Promise<Response> {
     const sessionId = url.searchParams.get('sessionId')?.trim() ?? '';
     const replyId = url.searchParams.get('replyId')?.trim() ?? '';
     if (!sessionId || sessionId.length > 80 || !replyId || replyId.length > 80) return fail(400, 'bad_request');
-    const reply = findReply(sessionId, replyId);
-    if (!reply) return fail(404, 'unknown_reply');
-    speech = reply.speech;
-    language = reply.language;
+
+    const chunkParam = url.searchParams.get('chunk');
+    if (chunkParam !== null) {
+      const chunkIndex = parseInt(chunkParam, 10);
+      if (isNaN(chunkIndex) || chunkIndex < 0) return fail(400, 'bad_request');
+      const chunkReply = findReplyChunk(sessionId, replyId, chunkIndex);
+      if (!chunkReply) return fail(404, 'chunk_not_found');
+      speech = chunkReply.speech;
+      language = chunkReply.language;
+    } else {
+      const reply = findReply(sessionId, replyId);
+      if (!reply) return fail(404, 'unknown_reply');
+      speech = reply.speech;
+      language = reply.language;
+    }
   }
   if (!limits.tts(clientKey(request))) return fail(429, 'rate_limited');
 

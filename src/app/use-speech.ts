@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { updateVoiceMediaSession } from '@/lib/ambient-sound';
 import { avatarEngine } from './avatar/anam-engine';
 import {
   chunkSentences,
@@ -62,6 +63,14 @@ function silentWav(): string {
 
 export type VoiceEngine = 'natural' | 'device' | 'avatar';
 
+export type PipelinedChunk = {
+  id: string;
+  text: string;
+  chunkIndex: number;
+  remoteUrl?: string;
+  language?: string;
+};
+
 /**
  * Krishna's voice. With `natural` on and a server reply URL, audio streams from ElevenLabs
  * through one shared <audio>; any failure falls back to the device voice with the same words.
@@ -71,7 +80,8 @@ export function useKrishnaVoice(natural = false, avatar = false) {
   const [supported, setSupported] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceName, setVoiceName] = useState<string | null>(null);
-  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [speakingId, setSpeakingIdState] = useState<string | null>(null);
+  const speakingIdRef = useRef<string | null>(null);
   const [lastEngine, setLastEngine] = useState<VoiceEngine | null>(null);
   const token = useRef(0);
   // Chrome can garbage-collect utterances before they finish unless something holds them.
@@ -81,6 +91,19 @@ export function useKrishnaVoice(natural = false, avatar = false) {
   naturalRef.current = natural;
   const avatarRef = useRef(avatar);
   avatarRef.current = avatar;
+
+  // Pipelined Audio Player state
+  const pipelinedQueueRef = useRef<PipelinedChunk[]>([]);
+  const pipelinedActiveRef = useRef<PipelinedChunk | null>(null);
+  const pipelinedFinalizedRef = useRef<boolean>(false);
+  const pipelinedOnDoneRef = useRef<(() => void) | undefined>(undefined);
+  const pipelinedNextAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const setSpeakingId = useCallback((id: string | null) => {
+    speakingIdRef.current = id;
+    setSpeakingIdState(id);
+    updateVoiceMediaSession(Boolean(id), 'Lord Krishna Speaking');
+  }, []);
 
   const audio = useCallback(() => {
     audioRef.current ??= new Audio();
@@ -111,11 +134,15 @@ export function useKrishnaVoice(natural = false, avatar = false) {
   const stop = useCallback(() => {
     token.current += 1;
     queue.current = [];
+    pipelinedQueueRef.current = [];
+    pipelinedActiveRef.current = null;
+    pipelinedFinalizedRef.current = false;
+    pipelinedOnDoneRef.current = undefined;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     audioRef.current?.pause();
     avatarEngine().stop();
     setSpeakingId(null);
-  }, []);
+  }, [setSpeakingId]);
 
   /** Call inside a tap handler before speech that will start later (Talk mode, auto-play). */
   const unlock = useCallback(() => {
@@ -243,10 +270,128 @@ export function useKrishnaVoice(natural = false, avatar = false) {
           else speakAudio(id, text, onDone, language, remoteUrl);
         });
     },
-    [speakAudio, speakDevice],
+    [speakAudio, speakDevice, setSpeakingId],
   );
 
-  return { supported: supported || natural, voices, voice, setVoice, speakingId, speak, stop, unlock, lastEngine };
+  const playNextChunk = useCallback(() => {
+    const myToken = token.current;
+
+    if (pipelinedQueueRef.current.length === 0) {
+      if (pipelinedFinalizedRef.current) {
+        pipelinedActiveRef.current = null;
+        setSpeakingId(null);
+        const onDone = pipelinedOnDoneRef.current;
+        pipelinedOnDoneRef.current = undefined;
+        onDone?.();
+      } else {
+        pipelinedActiveRef.current = null;
+      }
+      return;
+    }
+
+    const chunk = pipelinedQueueRef.current.shift()!;
+    pipelinedActiveRef.current = chunk;
+    setSpeakingId(chunk.id);
+
+    if (chunk.remoteUrl && naturalRef.current) {
+      const element = audio();
+      element.pause();
+      setLastEngine('natural');
+
+      const onChunkDone = () => {
+        if (token.current !== myToken) return;
+        element.onended = null;
+        element.onerror = null;
+        playNextChunk();
+      };
+
+      const onChunkError = () => {
+        if (token.current !== myToken) return;
+        element.onended = null;
+        element.onerror = null;
+        speakDevice(chunk.id, chunk.text, onChunkDone, chunk.language || 'en');
+      };
+
+      element.onended = onChunkDone;
+      element.onerror = onChunkError;
+      element.src = chunk.remoteUrl;
+      element.play().catch(onChunkError);
+
+      if (pipelinedQueueRef.current.length > 0 && pipelinedQueueRef.current[0].remoteUrl) {
+        const nextUrl = pipelinedQueueRef.current[0].remoteUrl;
+        const preloader = new Audio();
+        preloader.preload = 'auto';
+        preloader.src = nextUrl;
+        pipelinedNextAudioRef.current = preloader;
+      }
+    } else {
+      setLastEngine('device');
+      speakDevice(
+        chunk.id,
+        chunk.text,
+        () => {
+          if (token.current !== myToken) return;
+          playNextChunk();
+        },
+        chunk.language || 'en',
+      );
+    }
+  }, [audio, setSpeakingId, speakDevice]);
+
+  const pipelineChunk = useCallback(
+    (chunk: PipelinedChunk) => {
+      if (speakingIdRef.current !== chunk.id) {
+        token.current += 1;
+        pipelinedQueueRef.current = [];
+        pipelinedActiveRef.current = null;
+        pipelinedFinalizedRef.current = false;
+        pipelinedOnDoneRef.current = undefined;
+        setSpeakingId(chunk.id);
+      }
+
+      pipelinedQueueRef.current.push(chunk);
+
+      if (!pipelinedActiveRef.current) {
+        playNextChunk();
+      } else if (pipelinedQueueRef.current.length === 1 && chunk.remoteUrl && naturalRef.current) {
+        const preloader = new Audio();
+        preloader.preload = 'auto';
+        preloader.src = chunk.remoteUrl;
+        pipelinedNextAudioRef.current = preloader;
+      }
+    },
+    [playNextChunk, setSpeakingId],
+  );
+
+  const pipelineFinalize = useCallback(
+    (id: string, onDone?: () => void) => {
+      if (speakingIdRef.current === id || pipelinedActiveRef.current) {
+        pipelinedFinalizedRef.current = true;
+        pipelinedOnDoneRef.current = onDone;
+        if (!pipelinedActiveRef.current && pipelinedQueueRef.current.length === 0) {
+          setSpeakingId(null);
+          onDone?.();
+        }
+      } else {
+        onDone?.();
+      }
+    },
+    [setSpeakingId],
+  );
+
+  return {
+    supported: supported || natural,
+    voices,
+    voice,
+    setVoice,
+    speakingId,
+    speak,
+    pipelineChunk,
+    pipelineFinalize,
+    stop,
+    unlock,
+    lastEngine,
+  };
 }
 
 type RecognitionResult = { isFinal: boolean; 0: { transcript: string } };
@@ -542,7 +687,14 @@ export function useRecorder(lang: string, enabled: boolean) {
   return { supported: enabled && available, listening, interim: '', start, stop, cancel, level, transcribing, hasSpeech };
 }
 
-export type TalkTurn = { speak: string; pause: boolean; language?: string; remoteUrl?: string; aborted?: boolean };
+export type TalkTurn = {
+  speak: string;
+  pause: boolean;
+  language?: string;
+  remoteUrl?: string;
+  aborted?: boolean;
+  pipelined?: boolean;
+};
 
 export type TalkModeOptions = {
   onStitch?: (mergedText: string, additionalText: string) => void;
@@ -605,7 +757,17 @@ export function useTalkMode(
       dispatch({ type: 'heard', text: spoken });
 
       void sendRef.current(spoken, false).then((reply) => {
-        if (reply?.aborted || inFlightTokenRef.current !== myToken || live.current.mode !== 'thinking') return;
+        if (reply?.aborted || inFlightTokenRef.current !== myToken) return;
+
+        if (reply?.pipelined) {
+          if (live.current.mode === 'thinking') {
+            dispatch({ type: 'replied', pause: reply.pause });
+          }
+          voice.pipelineFinalize('talk', () => dispatch({ type: 'doneSpeaking' }));
+          return;
+        }
+
+        if (live.current.mode !== 'thinking') return;
 
         // If devotee started speaking continuation during thinking:
         if (hasSpeechRef.current?.()) {
@@ -664,7 +826,17 @@ export function useTalkMode(
           dispatch({ type: 'stitch', text: merged });
 
           void sendRef.current(merged, true).then((reply) => {
-            if (reply?.aborted || inFlightTokenRef.current !== myToken || live.current.mode !== 'thinking') return;
+            if (reply?.aborted || inFlightTokenRef.current !== myToken) return;
+
+            if (reply?.pipelined) {
+              if (live.current.mode === 'thinking') {
+                dispatch({ type: 'replied', pause: reply.pause });
+              }
+              voice.pipelineFinalize('talk', () => dispatch({ type: 'doneSpeaking' }));
+              return;
+            }
+
+            if (live.current.mode !== 'thinking') return;
 
             if (hasSpeechRef.current?.()) {
               heldReplyRef.current = reply;
@@ -687,6 +859,12 @@ export function useTalkMode(
     };
   }, [state.mode, state.turn, cancelListening]);
 
+  const notifySpeaking = useCallback(() => {
+    if (live.current.mode === 'thinking') {
+      dispatch({ type: 'replied', pause: false });
+    }
+  }, []);
+
   const begin = useCallback(() => {
     stopSpeaking();
     dispatch({ type: 'start' });
@@ -703,5 +881,5 @@ export function useTalkMode(
     dispatch({ type: 'end' });
   }, [cancelListening, stopSpeaking]);
 
-  return { state, begin, interrupt, end };
+  return { state, begin, interrupt, end, notifySpeaking };
 }

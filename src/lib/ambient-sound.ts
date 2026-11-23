@@ -86,6 +86,38 @@ class AmbientManager {
     this.listeners.forEach((fn) => fn());
   }
 
+  public updateMediaSession(isPlaying: boolean) {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    try {
+      const activeTrack = AMBIENT_TRACKS.find((t) => t.path === this.currentTrack);
+      const title = activeTrack ? activeTrack.name : 'Sacred Sanctuary Music';
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: 'Speak with Krishna',
+        album: 'Bhagavad Gita Sanctuary',
+        artwork: [
+          { src: '/krishna/avatar-192.webp', sizes: '192x192', type: 'image/webp' },
+          { src: '/krishna/avatar-512.webp', sizes: '512x512', type: 'image/webp' },
+          { src: '/krishna/portrait-1200.webp', sizes: '1200x1200', type: 'image/webp' },
+        ],
+      });
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
+      navigator.mediaSession.setActionHandler('play', () => {
+        this.setEnabled(true);
+        this.play();
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        this.stop();
+      });
+      navigator.mediaSession.setActionHandler('stop', () => {
+        this.stop();
+      });
+    } catch {
+      // MediaSession is optional, gracefully ignore if restricted in iframe/sandbox
+    }
+  }
+
   private initAudio() {
     if (this.audio || typeof window === 'undefined') return;
     this.audio = new Audio(this.currentTrack);
@@ -164,6 +196,7 @@ class AmbientManager {
           p.then(() => {
             const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
             this.fadeTo(goal, 1200);
+            this.updateMediaSession(true);
           }).catch(() => {});
         }
       }
@@ -185,6 +218,7 @@ class AmbientManager {
           p.then(() => {
             const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
             this.fadeTo(goal, 1200);
+            this.updateMediaSession(true);
           }).catch(() => {});
         }
       }
@@ -206,6 +240,7 @@ class AmbientManager {
           .then(() => {
             const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
             this.fadeTo(goal, 1200);
+            this.updateMediaSession(true);
           })
           .catch((err) => {
             if (err?.name === 'NotAllowedError') {
@@ -221,10 +256,12 @@ class AmbientManager {
     } else {
       const goal = this.isDucked ? DUCKED_VOLUME : this.targetVolume;
       this.fadeTo(goal, 800);
+      this.updateMediaSession(true);
     }
   }
 
   public stop() {
+    this.updateMediaSession(false);
     if (!this.audio || this.audio.paused) return;
     this.fadeTo(0, 600, () => {
       if (this.audio) this.audio.pause();
@@ -367,3 +404,32 @@ export function useAmbientSound() {
     duck,
   };
 }
+
+export function updateVoiceMediaSession(isPlaying: boolean, title = 'Lord Krishna Speaking') {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  try {
+    if (isPlaying) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: 'Lord Krishna',
+        album: 'Bhagavad Gita Sanctuary',
+        artwork: [
+          { src: '/krishna/avatar-192.webp', sizes: '192x192', type: 'image/webp' },
+          { src: '/krishna/avatar-512.webp', sizes: '512x512', type: 'image/webp' },
+          { src: '/krishna/portrait-1200.webp', sizes: '1200x1200', type: 'image/webp' },
+        ],
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    } else {
+      const mgr = AmbientManager.getInstance();
+      if (mgr.isEnabled()) {
+        mgr.updateMediaSession(true);
+      } else {
+        navigator.mediaSession.playbackState = 'paused';
+      }
+    }
+  } catch {
+    // Ignore environments where MediaSession is restricted
+  }
+}
+

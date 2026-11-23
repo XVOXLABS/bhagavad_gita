@@ -6,7 +6,7 @@ import { type DevoteeProfile } from '@/lib/profile';
 import { speakableText } from '@/lib/speech';
 import { respond, type ChatResult } from '@/lib/pipeline';
 import { CRISIS_MESSAGE, HELPLINES, mentionsCrisis } from '@/lib/safety';
-import { appendSession, clearSession, getSession } from '@/lib/session';
+import { appendSession, clearSession, completeDraftReply, getSession, registerDraftReply, appendDraftChunk } from '@/lib/session';
 import type { PipelineEvent } from '@/lib/stream-reply';
 import { replyText, type Reply } from '@/lib/verify';
 
@@ -92,14 +92,14 @@ function unavailable(crisis: boolean, calls: number): FinishedTurn {
 }
 
 /** Saves the turn (with the text the TTS route may speak) and builds the response body. */
-function finish(sessionId: string, message: string, result: ChatResult): FinishedTurn {
+function finish(sessionId: string, message: string, result: ChatResult, existingReplyId?: string): FinishedTurn {
   if (result.debug.dropped.length > 0) {
     console.info(JSON.stringify({ event: 'citation_rejected', dropped: result.debug.dropped, status: result.status }));
   }
   if (result.status === 'unavailable') return unavailable(result.crisis, result.calls);
 
   const guidance = replyText(result.reply);
-  const replyId = randomUUID();
+  const replyId = existingReplyId || randomUUID();
   appendSession(sessionId, [
     { role: 'user', content: message },
     {
@@ -111,6 +111,7 @@ function finish(sessionId: string, message: string, result: ChatResult): Finishe
       speech: speakableText(result.reply, result.crisis ? CRISIS_MESSAGE : undefined, result.language),
     },
   ]);
+  completeDraftReply(replyId);
 
   return {
     status: result.status,
@@ -138,6 +139,9 @@ function streamReply(
   memories?: CompanionMemory[],
 ): Response {
   const encoder = new TextEncoder();
+  const replyId = randomUUID();
+  registerDraftReply(sessionId, replyId, profile?.language || 'en');
+
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       let open = true;
@@ -149,25 +153,41 @@ function streamReply(
           open = false;
         }
       };
-      const emit = (event: PipelineEvent) =>
-        send(event.type === 'verses' ? { ...event, crisis: crisisBlock(event.crisis) } : event);
+
+      // Emit initial replyId right away so client can prepare pipelining
+      send({ type: 'init', replyId });
+
+      const emit = (event: PipelineEvent) => {
+        if (event.type === 'delta') {
+          const chunkIndex = appendDraftChunk(replyId, event.text);
+          send({ ...event, replyId, chunkIndex });
+        } else if (event.type === 'verses') {
+          send({ ...event, crisis: crisisBlock(event.crisis), replyId });
+        } else {
+          send(event);
+        }
+      };
 
       let done;
       try {
         // The turn is saved even if the reader has gone, so the session history stays complete.
         const result = await respond(message, getSession(sessionId), emit, profile, memories);
-        done = finish(sessionId, message, result);
+        done = finish(sessionId, message, result, replyId);
+        // Stream 'done' at once so user is not blocked by background memory extraction
+        send({ type: 'done', ...done });
+
         if (done.status !== 'unavailable') {
           const verseKey = result.verses.length > 0 ? `${result.verses[0].chapter}.${result.verses[0].verse}` : undefined;
           const newMemories = await extractMemories(message, done.guidance, memories, verseKey);
-          if (newMemories.length > 0) {
-            done = { ...done, newMemories };
+          if (newMemories.length > 0 && open && !request.signal.aborted) {
+            send({ type: 'memories', newMemories });
           }
         }
       } catch (error) {
         done = failed(message, error);
+        send({ type: 'done', ...done });
       }
-      send({ type: 'done', ...done });
+
       if (open) {
         open = false;
         try {
