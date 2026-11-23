@@ -2723,12 +2723,15 @@ a.brand {
 body.modal-drawer-open .topbar,
 body.modal-drawer-open .topbar-companion,
 body.modal-drawer-open .sanctuary-top-hud,
+body.modal-drawer-open .mobile-bottom-nav,
 body:has(.sanctuary-modal-backdrop) .topbar,
 body:has(.sanctuary-modal-backdrop) .topbar-companion,
 body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
+body:has(.sanctuary-modal-backdrop) .mobile-bottom-nav,
 .app:has(.sanctuary-modal-backdrop) .topbar,
 .app:has(.sanctuary-modal-backdrop) .topbar-companion,
-.app:has(.sanctuary-modal-backdrop) .sanctuary-top-hud {
+.app:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
+.app:has(.sanctuary-modal-backdrop) .mobile-bottom-nav {
   opacity: 0 !important;
   pointer-events: none !important;
   visibility: hidden !important;
@@ -2832,7 +2835,7 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
   text-transform: uppercase;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 960px) and (min-width: 769px) {
   .place-link-full {
     display: none;
   }
@@ -2841,7 +2844,7 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .topbar-center {
     display: none;
   }
@@ -4657,33 +4660,60 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
 }
 
 .auth-google-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
   width: 100%;
-  padding: 11px 16px;
-  border-radius: var(--radius-md);
+  height: 46px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
   background: #ffffff;
   color: #1f2937;
+  font-family: var(--font-sans);
   font-size: var(--size-14);
-  font-weight: 500;
-  border: none;
+  font-weight: 550;
+  border: 1px solid rgba(226, 183, 92, 0.45);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    0 0 12px rgba(226, 183, 92, 0.15);
+  position: relative;
+  overflow: hidden;
 }
 
 .auth-google-btn:hover {
-  background: #f3f4f6;
+  background: #f8fafc;
+  border-color: var(--gold-400);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.45),
+    0 0 20px rgba(226, 183, 92, 0.3);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.auth-google-btn:active {
+  transform: translateY(0) scale(0.99);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .auth-google-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+  box-shadow: none;
+}
+
+.auth-google-icon {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  max-width: 20px;
+  max-height: 20px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .auth-divider {
@@ -5134,22 +5164,8 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
   color: var(--cream-50);
 }
 
-/* Responsive Place Navigation Labels */
-.place-link-short {
-  display: none;
-}
-
-@media (max-width: 768px) {
-  .place-link-full {
-    display: none;
-  }
-  .place-link-short {
-    display: inline;
-  }
-}
-
 /* ==========================================================================
-   MOBILE BOTTOM NAVIGATION BAR (Thumb navigation on Reading & Library views)
+   MOBILE BOTTOM NAVIGATION BAR (Thumb navigation on all screens)
    ========================================================================== */
 
 .mobile-bottom-nav {
@@ -5173,6 +5189,10 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
 
   body:not(:has(.sanctuary-stage-fullscreen)) .content {
     padding-bottom: calc(4.75rem + env(safe-area-inset-bottom, 16px));
+  }
+
+  .sanctuary-input-bar-container {
+    margin-bottom: calc(80px + env(safe-area-inset-bottom, 8px)) !important;
   }
 }
 
@@ -5423,7 +5443,7 @@ body:has(.sanctuary-modal-backdrop) .sanctuary-top-hud,
   /* Unified Mobile Input Bar */
   .sanctuary-input-bar-container {
     padding: 0 var(--space-3);
-    margin-bottom: max(var(--space-2), env(safe-area-inset-bottom, 10px));
+    margin-bottom: calc(80px + env(safe-area-inset-bottom, 8px)) !important;
   }
 
   .sanctuary-input-bar {

@@ -182,7 +182,7 @@ export type TalkState = {
   turn: number;
   note: string;
 };
-
+ 
 export type TalkEvent =
   | { type: 'start' }
   | { type: 'heard'; text: string }

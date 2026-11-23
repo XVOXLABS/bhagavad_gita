@@ -1016,20 +1016,16 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           }}
           title={
             ambient.enabled
-              ? `${ambient.isFallback ? 'Default Sanctuary Ambient' : 'Krishna Flute & Bhakti Music'} · Click to Pause`
-              : 'Ambient Music Paused · Click to Play'
+              ? 'Background flute music is playing · Tap to mute'
+              : 'Background music is muted · Tap to play'
           }
-          aria-label={ambient.enabled ? 'Pause sacred ambient sound' : 'Play sacred ambient sound'}
+          aria-label={ambient.enabled ? 'Mute background music' : 'Play background music'}
         >
           <span className="ambient-chip-icon" aria-hidden="true">
             {ambient.enabled ? '🪈' : '🔇'}
           </span>
           <span className="ambient-chip-text">
-            {ambient.enabled
-              ? ambient.isFallback
-                ? 'Sacred Ambient'
-                : 'Krishna Flute'
-              : 'Music Muted'}
+            {ambient.enabled ? 'Music: On' : 'Music: Off'}
           </span>
         </button>
       </div>

@@ -31,8 +31,8 @@ export const AMBIENT_TRACKS: AmbientTrackOption[] = [
   },
 ];
 
-const DEFAULT_VOLUME = 0.18; // 18% volume is soft, serene, and non-intrusive ("lite")
-const DUCKED_VOLUME = 0.05;  // 5% volume when Krishna or devotee is speaking
+const DEFAULT_VOLUME = 0.05; // 5% default volume (gentle, peaceful background)
+const DUCKED_VOLUME = 0.02;  // 2% volume when Krishna or devotee is speaking
 
 class AmbientManager {
   private static instance: AmbientManager | null = null;

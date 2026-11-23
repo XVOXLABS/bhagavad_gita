@@ -157,29 +157,27 @@ export function AppShell({ children }: { children: ReactNode }) {
       <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
       {children}
 
-      {/* Modern Ergonomic Mobile Bottom Nav Bar (Active on Reading & Library screens) */}
-      {!isCompanion ? (
-        <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
-          <div className="mobile-bottom-nav-inner">
-            {PLACES.map((place) => {
-              const current = place.match(pathname);
-              const count = place.href === '/my-gita' ? saved.length : 0;
-              return (
-                <Link
-                  key={place.href}
-                  href={place.href}
-                  className={`mobile-nav-item ${current ? 'mobile-nav-active' : ''}`}
-                  aria-current={current ? 'page' : undefined}
-                >
-                  <span className="mobile-nav-icon">{place.icon}</span>
-                  <span className="mobile-nav-label">{place.shortLabel}</span>
-                  {count > 0 ? <span className="mobile-nav-badge">{count > 99 ? '99+' : count}</span> : null}
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
-      ) : null}
+      {/* Modern Ergonomic Mobile Bottom Nav Bar (Active across all screens) */}
+      <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+        <div className="mobile-bottom-nav-inner">
+          {PLACES.map((place) => {
+            const current = place.match(pathname);
+            const count = place.href === '/my-gita' ? saved.length : 0;
+            return (
+              <Link
+                key={place.href}
+                href={place.href}
+                className={`mobile-nav-item ${current ? 'mobile-nav-active' : ''}`}
+                aria-current={current ? 'page' : undefined}
+              >
+                <span className="mobile-nav-icon">{place.icon}</span>
+                <span className="mobile-nav-label">{place.shortLabel}</span>
+                {count > 0 ? <span className="mobile-nav-badge">{count > 99 ? '99+' : count}</span> : null}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }
