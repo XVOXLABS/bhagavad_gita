@@ -113,8 +113,8 @@ export const VAD = {
 };
 
 export const BARGE_IN_DEFAULTS = {
-  threshold: 0.042,
-  minDurationMs: 180,
+  threshold: 0.075,
+  minDurationMs: 280,
   checkIntervalMs: 60,
 };
 

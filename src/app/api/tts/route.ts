@@ -55,8 +55,7 @@ export async function GET(request: Request): Promise<Response> {
     return new Response(audio, {
       headers: {
         'Content-Type': CONTENT_TYPES[format],
-        // The greeting is the same for everyone, so browsers and the CDN can keep it.
-        'Cache-Control': greeting ? 'public, max-age=86400' : 'private, max-age=3600',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     });
   } catch (error) {

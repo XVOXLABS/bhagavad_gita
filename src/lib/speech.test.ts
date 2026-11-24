@@ -133,7 +133,7 @@ test('barge-in: detects sustained human speech and ignores short transient click
   let tracker = initialBargeInTracker();
 
   // 1. Single transient click (e.g. 60ms click) should not trigger
-  tracker = checkBargeIn(tracker, 0.08, 60);
+  tracker = checkBargeIn(tracker, 0.12, 60);
   assert.equal(tracker.triggered, false);
   assert.equal(tracker.sustainedMs, 60);
 
@@ -142,14 +142,18 @@ test('barge-in: detects sustained human speech and ignores short transient click
   assert.equal(tracker.triggered, false);
   assert.equal(tracker.sustainedMs, 0);
 
-  // 3. Sustained human voice (> 180ms) triggers barge-in
-  tracker = checkBargeIn(tracker, 0.06, 60); // 60ms
+  // 3. Sustained human voice (> 280ms) triggers barge-in
+  tracker = checkBargeIn(tracker, 0.09, 60); // 60ms
   assert.equal(tracker.triggered, false);
-  tracker = checkBargeIn(tracker, 0.05, 60); // 120ms
+  tracker = checkBargeIn(tracker, 0.08, 60); // 120ms
   assert.equal(tracker.triggered, false);
-  tracker = checkBargeIn(tracker, 0.07, 60); // 180ms -> Trigger!
+  tracker = checkBargeIn(tracker, 0.09, 60); // 180ms
+  assert.equal(tracker.triggered, false);
+  tracker = checkBargeIn(tracker, 0.08, 60); // 240ms
+  assert.equal(tracker.triggered, false);
+  tracker = checkBargeIn(tracker, 0.09, 60); // 300ms -> Trigger! (>= 280ms)
   assert.equal(tracker.triggered, true);
-  assert.equal(tracker.sustainedMs, 180);
+  assert.equal(tracker.sustainedMs, 300);
 });
 
 test('barge-in interruption during speaking and thinking transitions cleanly to listening', () => {

@@ -69,9 +69,9 @@ export function useBargeIn({ enabled, isSpeaking, onBargeIn }: UseBargeInOptions
 
         const frame = new Float32Array(analyser.fftSize);
         const startedAt = Date.now();
-        // Give browser AEC 350ms to converge and cancel Krishna's voice,
+        // Give browser AEC 500ms to converge and cancel Krishna's voice,
         // and ignore transient speech remnants from prior utterances.
-        const STARTUP_GRACE_MS = 350;
+        const STARTUP_GRACE_MS = 500;
 
         timer = window.setInterval(() => {
           if (cancelled) return;
