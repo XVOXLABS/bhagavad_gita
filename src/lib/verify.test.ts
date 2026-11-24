@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { lookup } from './corpus';
+import { detectFastIntent } from './pipeline';
 import {
   citesOnlyPrior,
   evaluateSelection,
@@ -199,4 +200,21 @@ test('stock openers are trimmed but real sentences are kept', () => {
   assert.equal(tidyOpener('It sounds like the week has been heavy.'), 'The week has been heavy.');
   assert.equal(tidyOpener('I see.'), 'I see.');
   assert.equal(tidyOpener('Losing a parent changes everything.'), 'Losing a parent changes everything.');
+});
+
+test('detectFastIntent handles Tamil acknowledgments and names with correct language', () => {
+  const ackTa = detectFastIntent('Okay கிருஷ்ணா.', 'en');
+  assert.ok(ackTa);
+  assert.equal(ackTa.intent, 'acknowledgment');
+  assert.equal(ackTa.replyLanguage, 'ta');
+
+  const ackSari = detectFastIntent('சரி கிருஷ்ணா', 'en');
+  assert.ok(ackSari);
+  assert.equal(ackSari.intent, 'acknowledgment');
+  assert.equal(ackSari.replyLanguage, 'ta');
+
+  const ackEn = detectFastIntent('thanks krishna', 'en');
+  assert.ok(ackEn);
+  assert.equal(ackEn.intent, 'acknowledgment');
+  assert.equal(ackEn.replyLanguage, 'en');
 });

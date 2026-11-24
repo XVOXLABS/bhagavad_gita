@@ -126,6 +126,35 @@ export function detectFastIntent(message: string, previousLanguage?: string): Si
     };
   }
 
+  const ACKS = new Set([
+    'thank you', 'thanks', 'thank you krishna', 'thanks krishna', 'dhanyawad', 'shukriya', 'nandri',
+    'ok', 'okay', 'got it', 'sure', 'alright', 'i agree', 'will do', 'i will do that', 'yes', 'understood',
+    'fine', 'cool',
+    'okay krishna', 'ok krishna', 'thanks krishna', 'thank you krishna',
+    'சரி', 'சரிங்க', 'சரி கிருஷ்ணா', 'சரிங்க கிருஷ்ணா', 'ஓகே கிருஷ்ணா', 'நன்றி', 'நன்றி கிருஷ்ணா', 'ரொம்ப நன்றி',
+  ]);
+
+  const isAck =
+    ACKS.has(clean) ||
+    [...ACKS].some((a) => clean === a || clean.startsWith(`${a} `) || clean.endsWith(` ${a}`));
+
+  if (isAck) {
+    const isTa = /[஀-௿]/.test(trimmed) || clean.includes('nandri') || clean.includes('sari');
+    const isHi = /[ऀ-ॿ]/.test(trimmed) || clean.includes('dhanyawad') || clean.includes('shukriya');
+    const detectedLang = isTa ? 'ta' : isHi ? 'hi' : previousLanguage || 'en';
+
+    return {
+      intent: 'acknowledgment',
+      replyLanguage: detectedLang,
+      emotions: [],
+      situation: '',
+      need: '',
+      themes: [],
+      crisis: false,
+      continuesPrevious: true,
+    };
+  }
+
   const GREETINGS = new Set([
     'hi', 'hello', 'hey', 'namaste', 'namaskar', 'pranam', 'pranaam',
     'radhe radhe', 'radhey radhey', 'jai shri krishna', 'hare krishna',
@@ -143,38 +172,19 @@ export function detectFastIntent(message: string, previousLanguage?: string): Si
     GREETINGS.has(firstTwo);
 
   if (isGreeting) {
+    const isTa = /[஀-௿]/.test(trimmed) || clean.includes('vanakkam') || clean.includes('namaskaram');
+    const isHi = /[ऀ-ॿ]/.test(trimmed) || clean.includes('namaste') || clean.includes('pranam');
+    const detectedLang = isTa ? 'ta' : isHi ? 'hi' : previousLanguage || 'en';
+
     return {
       intent: 'greeting',
-      replyLanguage: previousLanguage || 'en',
+      replyLanguage: detectedLang,
       emotions: [],
       situation: '',
       need: '',
       themes: [],
       crisis: false,
       continuesPrevious: false,
-    };
-  }
-
-  const ACKS = new Set([
-    'thank you', 'thanks', 'thank you krishna', 'thanks krishna', 'dhanyawad', 'shukriya', 'nandri',
-    'ok', 'okay', 'got it', 'sure', 'alright', 'i agree', 'will do', 'i will do that', 'yes', 'understood',
-    'fine', 'cool',
-  ]);
-
-  const isAck =
-    ACKS.has(clean) ||
-    [...ACKS].some((a) => clean.startsWith(`${a} `) || clean.endsWith(` ${a}`));
-
-  if (isAck) {
-    return {
-      intent: 'acknowledgment',
-      replyLanguage: previousLanguage || 'en',
-      emotions: [],
-      situation: '',
-      need: '',
-      themes: [],
-      crisis: false,
-      continuesPrevious: true,
     };
   }
 
