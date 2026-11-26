@@ -108,7 +108,7 @@ export const VAD = {
   /** RMS level (0-1) above which the frame counts as speech. */
   speechLevel: 0.035,
   silenceAfterSpeechMs: 1800,
-  noSpeechMs: 7000,
+  noSpeechMs: 15_000,
   maxMs: 60_000,
 };
 

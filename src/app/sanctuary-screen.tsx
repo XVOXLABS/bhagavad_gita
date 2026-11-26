@@ -1021,16 +1021,19 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
   const citedVerse = lastAssistant && lastAssistant.verses.length > 0 ? lastAssistant.verses[0] : null;
   const lastCrisis = lastAssistant?.crisis;
   const currentMode = talk.state.mode;
+  const isHearingUser = currentMode === 'listening' && (dictation.level > 0.22 || Boolean(dictation.hasSpeech?.()));
 
   let statusText = 'Radhe Radhe, my friend';
   if (!callActive) {
     statusText = 'Krishna is present with you';
+  } else if (dictation.transcribing) {
+    statusText = 'Krishna heard you…';
   } else if (currentMode === 'listening') {
-    statusText = 'I am listening… speak freely';
+    statusText = isHearingUser ? 'Krishna hears you…' : 'Speak now · Krishna is listening';
   } else if (isStitching) {
     statusText = 'Connecting your thought…';
   } else if (currentMode === 'thinking' || pending === 'send') {
-    statusText = 'Krishna is reflecting on your words…';
+    statusText = 'Krishna is thinking…';
   } else if (currentMode === 'speaking' || voice.speakingId) {
     statusText = 'Krishna is speaking…';
   } else if (currentMode === 'paused') {
@@ -1095,7 +1098,21 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
           </button>
         ) : (
           <div className="sanctuary-status-pill" role="status">
-            <span className={`status-dot status-dot-${currentMode !== 'off' ? currentMode : 'active'}`} />
+            {currentMode === 'listening' && !dictation.transcribing ? (
+              <span className={`voice-bars ${dictation.level > 0.18 ? 'voice-bars-active' : ''}`} aria-hidden="true">
+                {[0.55, 1.0, 0.75, 0.45].map((mult, idx) => (
+                  <span
+                    key={idx}
+                    className="voice-bar"
+                    style={{
+                      height: `${Math.max(4, Math.min(14, Math.round(4 + dictation.level * 12 * mult)))}px`,
+                    }}
+                  />
+                ))}
+              </span>
+            ) : (
+              <span className={`status-dot status-dot-${currentMode !== 'off' ? currentMode : 'active'}`} />
+            )}
             <span>{statusText}</span>
           </div>
         )}
@@ -1163,6 +1180,13 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
                 ? 'bar-mic-speaking'
                 : ''
               }`}
+            style={
+              currentMode === 'listening' && dictation.level > 0.08
+                ? {
+                    boxShadow: `0 0 ${Math.round(16 + dictation.level * 22)}px ${Math.round(dictation.level * 8)}px rgba(79, 193, 187, ${Math.min(0.95, 0.45 + dictation.level * 0.5)})`,
+                  }
+                : undefined
+            }
             onClick={handleMicTap}
             title={
               currentMode === 'listening'
@@ -1188,11 +1212,15 @@ export function SanctuaryScreen({ daily }: { daily: DisplayVerse | null }) {
             rows={1}
             className="bar-textarea"
             placeholder={
-              currentMode === 'listening'
-                ? 'Listening to your voice… (speak freely)'
-                : currentMode === 'thinking' || pending === 'send'
-                  ? 'Krishna is reflecting on your words…'
-                  : 'Share what is on your heart with Krishna…'
+              dictation.transcribing
+                ? 'Krishna heard you…'
+                : currentMode === 'listening'
+                  ? isHearingUser
+                    ? 'Krishna hears you…'
+                    : 'Speak now · Krishna is listening…'
+                  : currentMode === 'thinking' || pending === 'send'
+                    ? 'Krishna is thinking…'
+                    : 'Share what is on your heart with Krishna…'
             }
             value={draft}
             maxLength={2000}

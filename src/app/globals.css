@@ -2883,6 +2883,26 @@ body:has(.sanctuary-modal-backdrop) .mobile-bottom-nav,
   animation: fadeIn 0.4s ease-out;
 }
 
+.voice-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 14px;
+}
+
+.voice-bar {
+  width: 3px;
+  min-height: 4px;
+  border-radius: 999px;
+  background: rgba(79, 193, 187, 0.75);
+  transition: height 80ms ease-out, background-color 120ms ease;
+}
+
+.voice-bars-active .voice-bar {
+  background: #4fc1bb;
+  box-shadow: 0 0 6px rgba(79, 193, 187, 0.8);
+}
+
 /* Sacred Welcome Start Button (One-Tap Audio & Companion Unlock) */
 .sanctuary-welcome-start-btn {
   display: inline-flex;
